@@ -409,34 +409,14 @@ export LD_AUDIT="'"$SLSSTEAM_INSTALL_DIR"'/SLSsteam.so"' "$STEAM_SH"
     STEAM_LIB_DIR="$STEAM_DIR/ubuntu12_32"
     mkdir -p "$STEAM_LIB_DIR"
 
-    # Find correct libcurl path
-    CURL_LIB=""
-    case "$FAMILY" in
-        fedora)
-            if [ -f /usr/lib64/libcurl.so.4 ]; then
-                CURL_LIB="/usr/lib64/libcurl.so.4"
-            fi
-            ;;
-        debian)
-            if [ -f /usr/lib/x86_64-linux-gnu/libcurl.so.4 ]; then
-                CURL_LIB="/usr/lib/x86_64-linux-gnu/libcurl.so.4"
-            fi
-            ;;
-        arch)
-            if [ -f /usr/lib/libcurl.so.4 ]; then
-                CURL_LIB="/usr/lib/libcurl.so.4"
-            else
-                CURL_LIB=$(find /usr/lib -name 'libcurl.so*' 2>/dev/null | head -1 || true)
-            fi
-            ;;
-    esac
-
-    if [ -n "$CURL_LIB" ] && [ -f "$CURL_LIB" ]; then
+    # Find any libcurl in /usr/lib32 and symlink it
+    CURL_SOURCE=$(find /usr/lib32 -name 'libcurl.so*' 2>/dev/null | head -1)
+    if [ -n "$CURL_SOURCE" ]; then
         rm -f "$STEAM_LIB_DIR/libcurl.so.4"
-        ln -sf "$CURL_LIB" "$STEAM_LIB_DIR/libcurl.so.4"
-        echo "libcurl.so.4 symlink created."
+        ln -sf "$CURL_SOURCE" "$STEAM_LIB_DIR/libcurl.so.4"
+        echo "libcurl.so.4 symlink created from $CURL_SOURCE"
     else
-        echo -e "${YELLOW}Warning: libcurl not found. SLSsteam may not work correctly.${NC}"
+        echo -e "${YELLOW}Warning: libcurl not found in /usr/lib32. SLSsteam may not work correctly.${NC}"
     fi
 
     echo -e "${GREEN}SLSsteam installed successfully!${NC}"
