@@ -272,7 +272,7 @@ install_slssteam() {
     if [ -n "$STEAM_PID" ]; then
         echo "Closing Steam..."
         # Try steam protocol first
-        steam steam://exit 2>/dev/null || true
+        steam steam://exit &> /dev/null
         # Also try SIGTERM for robustness
         for pid in $STEAM_PID; do
             kill -TERM "$pid" 2>/dev/null || true
