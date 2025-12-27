@@ -242,7 +242,14 @@ install_slssteam() {
     SLSSTEAM_INSTALL_DIR="$HOME/.local/share/SLSsteam"
     SLSSTEAM_CONFIG_DIR="$HOME/.config/SLSsteam"
     STEAM_DIR="$HOME/.steam/steam"
+    STEAM_LIB_DIR="$STEAM_DIR/ubuntu12_32"
     TEMP_SLS="/tmp/slssteam.7z"
+
+    # Remove old libcurl symlink if exists
+    if [ -d "$STEAM_LIB_DIR" ]; then
+        rm -f "$STEAM_LIB_DIR/libcurl.so"*
+        echo "Old libcurl symlinks removed."
+    fi
 
     # Check if 7z is installed
     if ! command -v 7z >/dev/null 2>&1 && ! command -v 7za >/dev/null 2>&1; then
@@ -382,16 +389,6 @@ install_slssteam() {
 
     rm -rf /tmp/slssteam_extract "$TEMP_SLS"
 
-    # Create libcurl symlink (required for SLSsteam)
-    STEAM_LIB_DIR="$STEAM_DIR/ubuntu12_32"
-    mkdir -p "$STEAM_LIB_DIR"
-
-    for lib in /usr/lib32/libcurl.so*; do
-        [ -e "$lib" ] && ln -sf "$lib" "$STEAM_LIB_DIR/" 2>/dev/null && break
-    done
-    echo "libcurl symlinked."
-
-    echo -e "${GREEN}SLSsteam installed successfully!${NC}"
     echo "Just open Steam normally to play."
 }
 
