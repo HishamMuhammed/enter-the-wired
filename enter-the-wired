@@ -35,6 +35,7 @@ PKG_MANAGER=""
 INSTALL_CMD=""
 PACKAGE_LIST=""
 NEEDS_UPDATE=false
+SKIP_DEPS=false
 
 # Function to detect distribution family
 detect_distro_family() {
@@ -92,6 +93,15 @@ case "$FAMILY" in
         PKG_MANAGER="dnf"
         INSTALL_CMD="sudo dnf install -y"
         PACKAGE_LIST="python3 python3-pip python3-devel SDL2-devel gcc SDL2_mixer-devel SDL2_image-devel SDL2_ttf-devel git libnotify-devel"
+
+        # Check for rpm-ostree (Fedora Atomic/Silverblue/Kinoite/Bazzite)
+        if command -v rpm-ostree &>/dev/null && rpm-ostree status &>/dev/null 2>&1; then
+            echo -e "${YELLOW}Warning: Fedora Atomic image detected (rpm-ostree). Skipping system dependency installation.${NC}"
+            echo "Please install dependencies manually using 'rpm-ostree install' or 'toolbox'."
+            echo "For more info: https://docs.bazzite.gg/Installing_and_Managing_Software/"
+            echo ""
+            SKIP_DEPS=true
+        fi
         ;;
     debian)
         echo "Detected system: Debian/Ubuntu family"
@@ -131,15 +141,19 @@ if [ "$NEEDS_UPDATE" = true ]; then
     sudo apt update
 fi
 
-# Single installation command
-echo "Starting installation..."
-$INSTALL_CMD $PACKAGE_LIST
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Success! All dependencies installed.${NC}"
+# Single installation command (skip for rpm-ostree systems)
+if [ "$SKIP_DEPS" = true ]; then
+    echo "Skipping system dependency installation (Atomic system detected)."
 else
-    echo -e "${RED}Installation failed.${NC}"
-    exit 1
+    echo "Starting installation..."
+    $INSTALL_CMD $PACKAGE_LIST
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Success! All dependencies installed.${NC}"
+    else
+        echo -e "${RED}Installation failed.${NC}"
+        exit 1
+    fi
 fi
 
 # Install .NET SDK 9.0
@@ -265,27 +279,35 @@ install_slssteam() {
 
     # Check if 7z is installed
     if ! command -v 7z >/dev/null 2>&1 && ! command -v 7za >/dev/null 2>&1; then
-        echo "Installing p7zip..."
-        if ! case "$FAMILY" in
-            fedora) sudo dnf install -y p7zip p7zip-plugins ;;
-            debian) sudo apt install -y p7zip-full ;;
-            arch)   sudo pacman -Sy --noconfirm p7zip ;;
-        esac; then
-            echo -e "${RED}Error installing p7zip.${NC}"
-            return 1
+        if [ "$SKIP_DEPS" = true ]; then
+            echo "Warning: 7z not installed (required for SLSsteam). Please install manually."
+        else
+            echo "Installing p7zip..."
+            if ! case "$FAMILY" in
+                fedora) sudo dnf install -y p7zip p7zip-plugins ;;
+                debian) sudo apt install -y p7zip-full ;;
+                arch)   sudo pacman -Sy --noconfirm p7zip ;;
+            esac; then
+                echo -e "${RED}Error installing p7zip.${NC}"
+                return 1
+            fi
         fi
     fi
 
     # Check if wget is installed
     if ! command -v wget >/dev/null 2>&1; then
-        echo "Installing wget..."
-        if ! case "$FAMILY" in
-            fedora) sudo dnf install -y wget ;;
-            debian) sudo apt install -y wget ;;
-            arch)   sudo pacman -Sy --noconfirm wget ;;
-        esac; then
-            echo -e "${RED}Error installing wget.${NC}"
-            return 1
+        if [ "$SKIP_DEPS" = true ]; then
+            echo "Warning: wget not installed (required for SLSsteam). Please install manually."
+        else
+            echo "Installing wget..."
+            if ! case "$FAMILY" in
+                fedora) sudo dnf install -y wget ;;
+                debian) sudo apt install -y wget ;;
+                arch)   sudo pacman -Sy --noconfirm wget ;;
+            esac; then
+                echo -e "${RED}Error installing wget.${NC}"
+                return 1
+            fi
         fi
     fi
 
