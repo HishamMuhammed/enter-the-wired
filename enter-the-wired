@@ -26,8 +26,8 @@ fi
 
 source /etc/os-release
 
-# ACCELA URL (hosted on catbox.moe)
-ACCELA_URL="https://files.catbox.moe/ffb12t.gz"
+# ACCELA URL
+ACCELA_URL="https://cold-na-phx-3.gofile.io/download/web/0f3afeed-bb24-40b8-a474-c346c823006a/ACCELA-2025.12.29-18_47_38-linux-source.tar.gz"
 TEMP_ARCHIVE="accela_source.tar.gz"
 INSTALL_DIR="$HOME/accela"
 
