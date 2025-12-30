@@ -87,6 +87,51 @@ if [ -z "$FAMILY" ]; then
     exit 1
 fi
 
+# Terminals to check (in order of preference)
+LINUX_TERMINALS=("wezterm" "konsole" "gnome-terminal" "ptyxis" "alacritty" "tilix" "xfce4-terminal" "terminator" "mate-terminal" "lxterminal" "xterm" "kitty")
+
+# Function to find installed terminal
+find_installed_terminal() {
+    for terminal in "${LINUX_TERMINALS[@]}"; do
+        if command -v "$terminal" &>/dev/null; then
+            echo "$terminal"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function to install Konsole
+install_konsole() {
+    echo -e "${YELLOW}No terminal found. Installing Konsole...${NC}"
+    case "$FAMILY" in
+        fedora)
+            sudo dnf install -y konsole
+            ;;
+        debian)
+            sudo apt install -y konsole
+            ;;
+        arch)
+            sudo pacman -Sy --noconfirm konsole
+            ;;
+        *)
+            echo -e "${RED}Cannot install Konsole automatically on this distribution.${NC}"
+            return 1
+            ;;
+    esac
+}
+
+# Check for installed terminal
+INSTALLED_TERMINAL=$(find_installed_terminal)
+if [ -n "$INSTALLED_TERMINAL" ]; then
+    echo "Found terminal: $INSTALLED_TERMINAL"
+else
+    install_konsole
+    if command -v konsole &>/dev/null; then
+        echo "Konsole installed successfully."
+    fi
+fi
+
 case "$FAMILY" in
     fedora)
         echo "Detected system: Fedora family"
