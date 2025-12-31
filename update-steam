@@ -12,7 +12,7 @@ else
     NC=''
 fi
 
-STEAM_CFG="$HOME/.steam/steam/config/steam.cfg"
+STEAM_CFG="$HOME/.local/share/Steam/steam.cfg"
 
 echo -e "${YELLOW}Updating Steam configuration...${NC}"
 
