@@ -447,11 +447,19 @@ echo -e "${GREEN}Installing ACCELA...${NC}"
 rm -rf ACCELA-*-linux-source "$TEMP_ARCHIVE"
 
 
-echo "Downloading ACCELA..."
-if ! curl -L -o "$TEMP_ARCHIVE" "$ACCELA_URL"; then
-    echo -e "${RED}Download error. Check URL or connection.${NC}"
-    rm -f "$TEMP_ARCHIVE" 2>/dev/null
-    exit 1
+# Procurar por ACCELA*.tar.gz no diretório atual
+LOCAL_ARCHIVE=$(find . -maxdepth 1 -name "ACCELA*.tar.gz" -type f 2>/dev/null | head -1)
+
+if [ -n "$LOCAL_ARCHIVE" ]; then
+    echo "Found local archive: $LOCAL_ARCHIVE"
+    TEMP_ARCHIVE="$LOCAL_ARCHIVE"
+else
+    echo "Downloading ACCELA..."
+    if ! curl -L -o "$TEMP_ARCHIVE" "$ACCELA_URL"; then
+        echo -e "${RED}Download error. Check URL or connection.${NC}"
+        rm -f "$TEMP_ARCHIVE" 2>/dev/null
+        exit 1
+    fi
 fi
 
 # Verify download was successful (minimum 1KB)
