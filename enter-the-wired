@@ -37,32 +37,103 @@ PACKAGE_LIST=""
 NEEDS_UPDATE=false
 SKIP_DEPS=false
 
-# Steam directories (native and Flatpak)
+# Legacy variables for backward compatibility
 STEAM_DIR="$HOME/.steam/steam"
 FLATPAK_STEAM_DIR="$HOME/.var/app/com.valvesoftware.Steam/.steam/steam"
 FLATPAK_SLS_INSTALL_DIR="$HOME/.var/app/com.valvesoftware.Steam/.local/share/SLSsteam"
 FLATPAK_SLS_CONFIG_DIR="$HOME/.var/app/com.valvesoftware.Steam/.config/SLSsteam"
 
-# Function to detect Steam installation type
+# Function to find Steam executable (handles native, Flatpak, custom paths)
+find_steam_executable() {
+    # 1. Use standard Steam path
+    if [ -f "/usr/bin/steam" ]; then
+        echo "/usr/bin/steam"
+        return 0
+    fi
+
+    # 2. Check if Flatpak Steam is available
+    if command -v flatpak &>/dev/null; then
+        if flatpak info com.valvesoftware.Steam &>/dev/null 2>&1; then
+            echo "flatpak run com.valvesoftware.Steam"
+            return 0
+        fi
+    fi
+
+    # 3. Check PATH for steam command (fallback)
+    if command -v steam &>/dev/null; then
+        echo "$(command -v steam)"
+        return 0
+    fi
+
+    # 4. Check alternative paths
+    for path in /usr/local/bin/steam "$HOME/.local/bin/steam"; do
+        if [ -f "$path" ] && [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Function to find Steam directory (handles native, Flatpak, custom paths)
+find_steam_directory() {
+    # Common Steam installation paths (in order of preference)
+    local steam_paths=(
+        "$HOME/.steam/steam"                    # Modern Steam
+        "$HOME/.local/share/Steam"              # Traditional location
+        "$FLATPAK_STEAM_DIR"                    # Flatpak Steam
+        "/opt/steam/steam"                      # Custom /opt
+        "/usr/local/steam"                      # Custom /usr/local
+    )
+
+    for path in "${steam_paths[@]}"; do
+        if [ -d "$path" ] && [ -f "$path/steam.sh" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    # Fallback: check for any directory with steam.sh
+    for path in "${steam_paths[@]}"; do
+        if [ -d "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Function to detect Steam installation type (legacy, use find_steam_* instead)
 get_steam_dir() {
-    if [ -d "$FLATPAK_STEAM_DIR" ]; then
-        echo "$FLATPAK_STEAM_DIR"
+    local dir
+    if dir=$(find_steam_directory); then
+        echo "$dir"
     else
         echo "$STEAM_DIR"
     fi
 }
 
 get_sls_install_dir() {
-    if [ -d "$FLATPAK_STEAM_DIR" ]; then
-        echo "$FLATPAK_SLS_INSTALL_DIR"
+    if find_steam_directory &>/dev/null; then
+        if [ -d "$FLATPAK_STEAM_DIR" ]; then
+            echo "$FLATPAK_SLS_INSTALL_DIR"
+        else
+            echo "$HOME/.local/share/SLSsteam"
+        fi
     else
         echo "$HOME/.local/share/SLSsteam"
     fi
 }
 
 get_sls_config_dir() {
-    if [ -d "$FLATPAK_STEAM_DIR" ]; then
-        echo "$FLATPAK_SLS_CONFIG_DIR"
+    if find_steam_directory &>/dev/null; then
+        if [ -d "$FLATPAK_STEAM_DIR" ]; then
+            echo "$FLATPAK_SLS_CONFIG_DIR"
+        else
+            echo "$HOME/.config/SLSsteam"
+        fi
     else
         echo "$HOME/.config/SLSsteam"
     fi
@@ -74,10 +145,9 @@ run_steam_with_sls() {
     sls_dir=$(get_sls_install_dir)
     local steam_exe
 
-    if [ -d "$FLATPAK_STEAM_DIR" ]; then
-        steam_exe="flatpak run com.valvesoftware.Steam"
-    else
-        steam_exe="/usr/bin/steam"
+    if ! steam_exe=$(find_steam_executable); then
+        echo "  Warning: Steam executable not found, cannot run Steam"
+        return 1
     fi
 
     local ld_audit=""
@@ -245,9 +315,10 @@ detect_distro_family() {
 FAMILY=$(detect_distro_family)
 
 if [ -z "$FAMILY" ]; then
-    echo -e "${RED}Error: Could not detect distribution family.${NC}"
+    echo -e "${YELLOW}Warning: Could not detect distribution family.${NC}"
     echo "ID=$ID, ID_LIKE=$ID_LIKE"
-    exit 1
+    echo "Defaulting to debian family (apt). You can override with: FAMILY=debian|arch|fedora $0"
+    FAMILY="debian"
 fi
 
 # Terminals to check (in order of preference)
@@ -481,45 +552,83 @@ install_slssteam() {
         echo "Old libcurl symlinks removed."
     fi
 
-    # Check if 7z is installed
-    if ! command -v 7z >/dev/null 2>&1 && ! command -v 7za >/dev/null 2>&1; then
+    # Check if 7z is installed, try unzip as fallback
+    EXTRACT_CMD=""
+    EXTRACT_TYPE=""
+    if command -v 7z >/dev/null 2>&1 || command -v 7za >/dev/null 2>&1; then
+        EXTRACT_CMD="7z x"
+        EXTRACT_TYPE="7z"
+    elif command -v unzip >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: 7z not found, using unzip as fallback${NC}"
+        EXTRACT_CMD="unzip -AA"
+        EXTRACT_TYPE="unzip"
+    else
         if [ "$SKIP_DEPS" = true ]; then
-            echo "Warning: 7z not installed (required for SLSsteam). Please install manually."
+            echo -e "${YELLOW}Warning: Neither 7z nor unzip found${NC}"
+            echo "SLSsteam installation will be skipped. Install p7zip or unzip to continue."
+            return 0
         else
             echo "Installing p7zip..."
-            if ! case "$FAMILY" in
+            if case "$FAMILY" in
                 fedora) sudo dnf install -y p7zip p7zip-plugins ;;
                 debian) sudo apt install -y p7zip-full ;;
                 arch)   sudo pacman -Sy --noconfirm p7zip ;;
             esac; then
-                echo -e "${RED}Error installing p7zip.${NC}"
-                return 1
+                EXTRACT_CMD="7z x"
+                EXTRACT_TYPE="7z"
+            else
+                echo -e "${YELLOW}Warning: Could not install 7z, trying unzip...${NC}"
+                if command -v unzip >/dev/null 2>&1; then
+                    EXTRACT_CMD="unzip -AA"
+                    EXTRACT_TYPE="unzip"
+                else
+                    echo -e "${YELLOW}Warning: Neither 7z nor unzip available${NC}"
+                    echo "SLSsteam installation will be skipped."
+                    return 0
+                fi
             fi
         fi
     fi
 
-    # Check if wget is installed
-    if ! command -v wget >/dev/null 2>&1; then
+    # Check if wget is installed, try curl as fallback
+    DOWNLOAD_CMD=""
+    if command -v wget >/dev/null 2>&1; then
+        DOWNLOAD_CMD="wget -q -O"
+    elif command -v curl >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: wget not found, using curl as fallback${NC}"
+        DOWNLOAD_CMD="curl -sL -o"
+    else
         if [ "$SKIP_DEPS" = true ]; then
-            echo "Warning: wget not installed (required for SLSsteam). Please install manually."
+            echo -e "${YELLOW}Warning: Neither wget nor curl found${NC}"
+            echo "SLSsteam installation will be skipped."
+            return 0
         else
             echo "Installing wget..."
-            if ! case "$FAMILY" in
+            if case "$FAMILY" in
                 fedora) sudo dnf install -y wget ;;
                 debian) sudo apt install -y wget ;;
                 arch)   sudo pacman -Sy --noconfirm wget ;;
             esac; then
-                echo -e "${RED}Error installing wget.${NC}"
-                return 1
+                DOWNLOAD_CMD="wget -q -O"
+            else
+                echo -e "${YELLOW}Warning: Could not install wget, trying curl...${NC}"
+                if command -v curl >/dev/null 2>&1; then
+                    DOWNLOAD_CMD="curl -sL -o"
+                else
+                    echo -e "${YELLOW}Warning: Neither wget nor curl available${NC}"
+                    echo "SLSsteam installation will be skipped."
+                    return 0
+                fi
             fi
         fi
     fi
 
-    # Check if Steam is installed
-    if [ ! -d "$STEAM_DIR" ]; then
-        echo -e "${RED}Steam not found at $STEAM_DIR${NC}"
-        echo "Please install Steam first."
-        return 1
+    # Check if Steam is installed (warning only, don't fail)
+    if ! STEAM_DIR=$(find_steam_directory); then
+        echo -e "${YELLOW}Warning: Steam directory not found${NC}"
+        echo "SLSsteam installation will be skipped. ACCELA will still work."
+        echo "Install Steam and re-run this script to enable SLSsteam."
+        return 0
     fi
 
     # Check if Steam is running and warn user
@@ -569,7 +678,7 @@ install_slssteam() {
         return 1
     fi
 
-    if ! wget -q -O "$TEMP_SLS" "$LATEST_URL"; then
+    if ! $DOWNLOAD_CMD "$TEMP_SLS" "$LATEST_URL"; then
         echo -e "${RED}Error downloading SLSsteam.${NC}"
         rm -f "$TEMP_SLS"
         return 1
@@ -580,7 +689,7 @@ install_slssteam() {
     rm -rf /tmp/slssteam_extract
     mkdir -p /tmp/slssteam_extract
 
-    if ! 7z x "$TEMP_SLS" -o/tmp/slssteam_extract -y 2>&1 | tail -5; then
+    if ! $EXTRACT_CMD "$TEMP_SLS" -o/tmp/slssteam_extract -y 2>&1 | tail -5; then
         echo -e "${RED}Error extracting archive.${NC}"
         rm -rf /tmp/slssteam_extract "$TEMP_SLS"
         return 1
@@ -644,7 +753,7 @@ is_steam_deck() {
 configure_slssteam_injection() {
     local sls_dir
     sls_dir=$(get_sls_install_dir)
-    local steam_script="/usr/bin/steam"
+    local steam_script
     local ld_audit
 
     # Check if SLSsteam is installed
@@ -653,10 +762,11 @@ configure_slssteam_injection() {
         return 1
     fi
 
-    # Check if Steam is installed
-    if [[ ! -f "$steam_script" ]]; then
-        echo "Warn: Steam not found at $steam_script"
-        return 1
+    # Check if Steam executable is available (warning only)
+    if ! steam_script=$(find_steam_executable 2>/dev/null); then
+        echo -e "${YELLOW}Warning: Steam executable not found${NC}"
+        echo "SLSsteam injection will be skipped. Re-run after installing Steam."
+        return 0
     fi
 
     # Build LD_AUDIT string from .so files

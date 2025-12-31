@@ -5,12 +5,80 @@ set -euo pipefail
 if [ -t 1 ] && [ -t 0 ]; then
     GREEN='\033[0;32m'
     RED='\033[0;31m'
+    YELLOW='\033[1;33m'
     NC='\033[0m'
 else
     GREEN=''
     RED=''
+    YELLOW=''
     NC=''
 fi
+
+# Steam directories (native and Flatpak) - multiple common paths supported
+STEAM_DIR="$HOME/.steam/steam"
+FLATPAK_STEAM_DIR="$HOME/.var/app/com.valvesoftware.Steam/.steam/steam"
+
+# Function to find Steam executable (handles native, Flatpak, custom paths)
+find_steam_executable() {
+    # 1. Use standard Steam path
+    if [ -f "/usr/bin/steam" ]; then
+        echo "/usr/bin/steam"
+        return 0
+    fi
+
+    # 2. Check if Flatpak Steam is available
+    if command -v flatpak &>/dev/null; then
+        if flatpak info com.valvesoftware.Steam &>/dev/null 2>&1; then
+            echo "flatpak run com.valvesoftware.Steam"
+            return 0
+        fi
+    fi
+
+    # 3. Check PATH for steam command (fallback)
+    if command -v steam &>/dev/null; then
+        echo "$(command -v steam)"
+        return 0
+    fi
+
+    # 4. Check alternative paths
+    for path in /usr/local/bin/steam "$HOME/.local/bin/steam"; do
+        if [ -f "$path" ] && [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Function to find Steam directory
+find_steam_directory() {
+    # Common Steam installation paths (in order of preference)
+    local steam_paths=(
+        "$HOME/.steam/steam"                    # Modern Steam
+        "$HOME/.local/share/Steam"              # Traditional location
+        "$FLATPAK_STEAM_DIR"                    # Flatpak Steam
+        "/opt/steam/steam"                      # Custom /opt
+        "/usr/local/steam"                      # Custom /usr/local
+    )
+
+    for path in "${steam_paths[@]}"; do
+        if [ -d "$path" ] && [ -f "$path/steam.sh" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    # Fallback: check for any existing directory
+    for path in "${steam_paths[@]}"; do
+        if [ -d "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 # This script uninstalls ACCELA and SLSsteam from the user's home directory, providing a clear restart for updates and fixes.
 
@@ -18,24 +86,29 @@ fi
 uninstall_slssteam_injection() {
     echo "Cleaning up SLSsteam injection..."
 
-    local steam_script="/usr/bin/steam"
-    local steam_backup="${steam_script}.bak"
+    local steam_script
+    local steam_backup
     local desktop_shortcut="$HOME/.local/share/applications/steam.desktop"
     local autostart_file="$HOME/.config/autostart/steam.desktop"
 
-    # Restore original steam script from backup
-    if [[ -f "$steam_backup" ]]; then
-        sudo cp "$steam_backup" "$steam_script"
-        echo "  Restored original: $steam_script"
-        # Remove backup after restore
-        sudo rm -f "$steam_backup"
-    else
-        echo "  No backup found at $steam_backup"
-        # Try to remove LD_AUDIT lines manually (any path)
-        if grep -q "LD_AUDIT" "$steam_script" 2>/dev/null; then
-            sudo sed -i '/^export LD_AUDIT/d' "$steam_script"
-            echo "  Removed LD_AUDIT lines from $steam_script"
+    # Try to find Steam executable
+    if steam_script=$(find_steam_executable 2>/dev/null); then
+        steam_backup="${steam_script}.bak"
+
+        # Restore original steam script from backup
+        if [[ -f "$steam_backup" ]]; then
+            sudo cp "$steam_backup" "$steam_script"
+            echo "  Restored original: $steam_script"
+            sudo rm -f "$steam_backup"
+        else
+            # Try to remove LD_AUDIT lines if present
+            if grep -q "LD_AUDIT" "$steam_script" 2>/dev/null; then
+                sudo sed -i '/^export LD_AUDIT/d' "$steam_script"
+                echo "  Removed LD_AUDIT lines from $steam_script"
+            fi
         fi
+    else
+        echo -e "${YELLOW}  Warning: Steam executable not found, skipping script cleanup${NC}"
     fi
 
     # Remove desktop shortcut override (system shortcut will be used again)
