@@ -185,7 +185,7 @@ finalize_steam() {
     done
 
     # Give Steam time to update
-    sleep 5
+    sleep 20
 
     # Force close Steam
     steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
