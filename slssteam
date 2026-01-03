@@ -149,6 +149,48 @@ run_steam_with_sls() {
     fi
 }
 
+# Function to create wrapper at /usr/local/bin/steam for Bazzite Game Mode
+create_steam_wrapper() {
+    local sls_dir
+    sls_dir=$(get_sls_install_dir)
+    local wrapper_path="/usr/local/bin/steam"
+
+    # Build LD_AUDIT string
+    local ld_audit=""
+    while IFS= read -r so_file; do
+        if [ -n "$so_file" ]; then
+            if [ -z "$ld_audit" ]; then
+                ld_audit="$so_file"
+            else
+                ld_audit="$ld_audit:$so_file"
+            fi
+        fi
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+
+    if [ -z "$ld_audit" ]; then
+        echo "  Warning: No .so files found in $sls_dir"
+        return 1
+    fi
+
+    # Check if /usr/local/bin exists
+    if [ ! -d "/usr/local/bin" ]; then
+        echo "  Creating /usr/local/bin directory..."
+        sudo mkdir -p /usr/local/bin
+    fi
+
+    # Create wrapper script
+    echo "  Creating Steam wrapper at $wrapper_path..."
+    sudo tee "$wrapper_path" > /dev/null << EOF
+#!/usr/bin/env bash
+# BazziteOS Game Mode wrapper for SLSsteam
+export LD_AUDIT="$ld_audit"
+exec /usr/bin/steam "\$@"
+EOF
+
+    sudo chmod +x "$wrapper_path"
+    echo "  Steam wrapper created successfully"
+}
+
 # Function to patch steam-jupiter for Steam Deck Gaming Mode
 patch_steam_jupiter() {
     local steam_jupiter="/usr/bin/steam-jupiter"
@@ -772,6 +814,11 @@ install_slssteam() {
     if [ -f "$HOME/.steam/steam/steam.sh" ] || [ -f "$HOME/.local/share/Steam/steam.sh" ]; then
         patch_steam_sh
     fi
+
+    # Create wrapper at /usr/local/bin/steam for Bazzite Game Mode (redundant injection)
+    echo ""
+    echo -e "${GREEN}Creating Steam wrapper for Game Mode injection...${NC}"
+    create_steam_wrapper
 
     echo ""
     echo "SLSsteam installed and configured successfully!"
