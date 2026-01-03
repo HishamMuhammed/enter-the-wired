@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-set -eu
+set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_BASE="$HOME/.local/share/millennium/.venv"
+VENV_ACTIVATE="$VENV_BASE/bin/activate"
+PLUGINS_DIR="$HOME/.local/share/millennium/plugins"
 
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-VENV_BASE=$HOME/.local/share/millennium/.venv
-VENV_ACTIVATE=$VENV_BASE/bin/activate
-PLUGINS_DIR=$HOME/.local/share/millennium/plugins
+check_millennium() {
+    [ -d "$HOME/.local/share/millennium" ]
+}
 
-
-installmillennium(){
+install_millennium() {
     echo "Installing Millennium..."
     curl -fsSL https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/scripts/install.sh | bash
 }
@@ -17,8 +19,16 @@ get_latest_release() {
     curl -sL "https://api.github.com/repos/ciscosweater/cyberia/releases/latest" | jq -r '.tag_name'
 }
 
-installcyberia(){
-    local latest_tag version zip_path
+install_cyberia(){
+    local latest_tag version zip_path plugin_dir
+
+    # Check if Millennium is installed
+    if ! check_millennium; then
+        echo "Millennium not found. Installing..."
+        install_millennium
+    else
+        echo "Millennium already installed."
+    fi
 
     # Create venv if it doesn't exist
     if [ ! -f "$VENV_ACTIVATE" ]; then
@@ -29,25 +39,28 @@ installcyberia(){
     latest_tag=$(get_latest_release)
     version="${latest_tag#v}"
     zip_path="$SCRIPT_DIR/cyberia-v${version}.zip"
+    plugin_dir="$PLUGINS_DIR/cyberia-v${version}"
 
-    echo "Downloading Latest Cyberia (${latest_tag})..."
-    cd "$SCRIPT_DIR/"
-    wget -q "https://github.com/ciscosweater/cyberia/releases/download/${latest_tag}/cyberia-v${version}.zip"
+    echo "Downloading Cyberia ${latest_tag}..."
+    if ! wget -q --show-progress "https://github.com/ciscosweater/cyberia/releases/download/${latest_tag}/cyberia-v${version}.zip" -O "$zip_path"; then
+        echo "Failed to download Cyberia."
+        exit 1
+    fi
 
     echo "Extracting..."
-    rm -rf "$PLUGINS_DIR/cyberia-v${version}"
-    unzip -q -d "$PLUGINS_DIR/" "$zip_path"
+    rm -rf "$plugin_dir"
+    unzip -q "$zip_path" -d "$PLUGINS_DIR/"
 
-    echo "Installing Dependencies..."
+    echo "Installing dependencies..."
     source "$VENV_ACTIVATE"
-    pip install -r "$PLUGINS_DIR/cyberia-v${version}/requirements.txt" &> /dev/null
+    pip install --quiet --disable-pip-version-check -r "$plugin_dir/requirements.txt"
 
     rm "$zip_path"
-    echo "Launching Plugins Page - Activate Cyberia, Save and Reload."
-    steam steam://millennium/settings/plugins &> /dev/null
+    echo "Cyberia installed successfully!"
+    echo ""
+    echo "To enable: Steam > Millennium > Settings > Plugins > Enable Cyberia > Save & Reload"
 }
 
-installmillennium
-installcyberia
+install_cyberia
 
 
