@@ -51,26 +51,6 @@ echo "Installing SLSsteam..."
 echo "----------------------------------------------"
 install_slssteam
 
-# First: open Steam without steam.cfg so it can update
-echo ""
-echo -e "${GREEN}Finalizing Steam configuration...${NC}"
-finalize_steam
-
-# Then: patch Steam scripts (after Steam closes)
-echo -e "${GREEN}Patching Steam scripts...${NC}"
-configure_slssteam_injection
-
-# Steam Deck: patch steam-jupiter for Gaming Mode
-if [ -f "/usr/bin/steam-jupiter" ]; then
-    echo -e "${GREEN}Patching steam-jupiter for Steam Deck Gaming Mode...${NC}"
-    patch_steam_jupiter
-fi
-
-# Always patch steam.sh (used in Desktop Mode, even on Steam Deck)
-if [ -f "$HOME/.steam/steam/steam.sh" ] || [ -f "$HOME/.local/share/Steam/steam.sh" ]; then
-    patch_steam_sh
-fi
-
 echo ""
 echo "=============================================="
 echo -e "${GREEN}  ALL INSTALLATIONS COMPLETED!${NC}"
