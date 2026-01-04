@@ -168,8 +168,8 @@ create_steam_wrapper() {
     done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
 
     if [ -z "$ld_audit" ]; then
-        echo "  Warning: No .so files found in $sls_dir"
-        return 1
+        echo "  Warning: No .so files found in $sls_dir, skipping wrapper creation"
+        return 0
     fi
 
     # Check if /usr/local/bin exists
@@ -199,7 +199,7 @@ patch_steam_jupiter() {
 
     if [ ! -f "$steam_jupiter" ]; then
         echo "  steam-jupiter not found at $steam_jupiter (not a Steam Deck)"
-        return 1
+        return 0
     fi
 
     echo "  Patching steam-jupiter at $steam_jupiter..."
@@ -255,7 +255,7 @@ patch_steam_sh() {
 
     if [ ! -f "$steam_sh" ]; then
         echo "  steam.sh not found at $steam_sh"
-        return 1
+        return 0
     fi
 
     # Build LD_AUDIT string
@@ -832,9 +832,13 @@ install_slssteam() {
     fi
 
     # Create wrapper at /usr/local/bin/steam for Bazzite Game Mode (redundant injection)
-    echo ""
-    echo -e "${GREEN}Creating Steam wrapper for Game Mode injection...${NC}"
-    create_steam_wrapper
+    if [ "$FAMILY" = "bazzite" ]; then
+        echo ""
+        echo -e "${GREEN}Creating Steam wrapper for Bazzite Game Mode...${NC}"
+        create_steam_wrapper
+    else
+        echo "  Skipping wrapper creation (not Bazzite)"
+    fi
 
     echo ""
     echo "SLSsteam installed and configured successfully!"
