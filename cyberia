@@ -48,7 +48,7 @@ install_cyberia(){
     fi
 
     echo "Extracting..."
-    rm -rf "$plugin_dir"
+    rm -rf "$PLUGINS_DIR"/cyberia-v*
     unzip -q "$zip_path" -d "$PLUGINS_DIR/"
 
     echo "Installing dependencies..."
@@ -59,8 +59,7 @@ install_cyberia(){
     echo "Cyberia installed successfully!"
     echo ""
     echo "To enable: Steam > Millennium > Settings > Plugins > Enable Cyberia > Save & Reload"
+    steam steam://millennium/settings/plugins &> /dev/null &
 }
 
 install_cyberia
-
-
