@@ -809,6 +809,8 @@ install_slssteam() {
         cp "$SLSSTEAM_SO" "$SLSSTEAM_INSTALL_DIR/"
     fi
 
+    # Change to a safe directory before cleanup to avoid getcwd() failure
+    cd ~ 2>/dev/null || cd / 2>/dev/null || true
     rm -rf /tmp/slssteam_extract "$TEMP_SLS"
 
     echo ""
