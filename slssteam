@@ -139,7 +139,7 @@ run_steam_with_sls() {
                 ld_audit="$ld_audit:$so_file"
             fi
         fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
 
     if [ -n "$ld_audit" ]; then
         LD_AUDIT="$ld_audit" $steam_exe "$@"
@@ -165,7 +165,7 @@ create_steam_wrapper() {
                 ld_audit="$ld_audit:$so_file"
             fi
         fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
 
     if [ -z "$ld_audit" ]; then
         echo "  Warning: No .so files found in $sls_dir, skipping wrapper creation"
@@ -220,7 +220,7 @@ patch_steam_jupiter() {
                 ld_audit="$ld_audit:$so_file"
             fi
         fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
 
     if [ -z "$ld_audit" ]; then
         echo "  Warning: No .so files found in $sls_dir"
@@ -268,7 +268,7 @@ patch_steam_sh() {
                 ld_audit="$ld_audit:$so_file"
             fi
         fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
 
     # Check if already patched (use simpler grep pattern)
     if grep -q "LD_AUDIT.*SLSsteam" "$steam_sh" 2>/dev/null; then
@@ -444,7 +444,7 @@ get_ld_audit() {
                 ld_audit="$ld_audit:$so_file"
             fi
         fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort)
+    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
 
     echo "$ld_audit"
 }
