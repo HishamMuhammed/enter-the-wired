@@ -22,6 +22,7 @@ STEAM_DIR="$HOME/.steam/steam"
 FLATPAK_STEAM_DIR="$HOME/.var/app/com.valvesoftware.Steam/.steam/steam"
 FLATPAK_SLS_INSTALL_DIR="$HOME/.var/app/com.valvesoftware.Steam/.local/share/SLSsteam"
 FLATPAK_SLS_CONFIG_DIR="$HOME/.var/app/com.valvesoftware.Steam/.config/SLSsteam"
+REPO_SLS_LOCATION="/usr/lib32"
 
 # Function to find Steam executable (handles native, Flatpak, custom paths)
 find_steam_executable() {
@@ -121,30 +122,60 @@ get_sls_config_dir() {
 
 # Function to run Steam with SLSsteam injection
 run_steam_with_sls() {
-    local sls_dir
-    sls_dir=$(get_sls_install_dir)
     local steam_exe
+    local ld_audit
 
     if ! steam_exe=$(find_steam_executable); then
         echo "  Warning: Steam executable not found, cannot run Steam"
         return 1
     fi
 
-    # Hardcoded order: library-inject.so must be first for LD_AUDIT
-    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
-
+    ld_audit=$(get_ld_audit)
     LD_AUDIT="$ld_audit" $steam_exe "$@"
-    # No fallback - hardcoded assumes files exist
+}
+
+# Function to close Steam gracefully via steam://exit
+close_steam_graceful() {
+    local steam_exe
+
+    if ! steam_exe=$(find_steam_executable 2>/dev/null); then
+        echo "  Warning: Steam executable not found, using kill fallback"
+        pkill -x steam 2>/dev/null || true
+        return 1
+    fi
+
+    echo "  Closing Steam gracefully via steam://exit..."
+    $steam_exe steam://exit 2>/dev/null || true
+}
+
+# Function to close Steam (tries graceful first, then kill)
+close_steam() {
+    local steam_pids
+
+    # Try graceful close first
+    close_steam_graceful
+
+    # Wait a bit then force kill if still running
+    sleep 3
+
+    steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
+    if [ -z "$steam_pids" ] && [ -d "$FLATPAK_STEAM_DIR" ]; then
+        steam_pids=$(pgrep -f "com.valvesoftware.Steam" 2>/dev/null || true)
+    fi
+
+    if [ -n "$steam_pids" ]; then
+        echo "  Force closing Steam..."
+        echo "$steam_pids" | xargs kill 2>/dev/null || true
+        sleep 2
+    fi
 }
 
 # Function to create wrapper at /usr/local/bin/steam for Bazzite Game Mode
 create_steam_wrapper() {
-    local sls_dir
-    sls_dir=$(get_sls_install_dir)
     local wrapper_path="/usr/local/bin/steam"
+    local ld_audit
 
-    # Hardcoded order: library-inject.so must be first for LD_AUDIT
-    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
+    ld_audit=$(get_ld_audit)
 
     # Check if /usr/local/bin exists
     if [ ! -d "/usr/local/bin" ]; then
@@ -168,13 +199,14 @@ EOF
 # Function to patch steam-jupiter for Steam Deck Gaming Mode
 patch_steam_jupiter() {
     local steam_jupiter="/usr/bin/steam-jupiter"
-    local sls_dir
-    sls_dir=$(get_sls_install_dir)
+    local ld_audit
 
     if [ ! -f "$steam_jupiter" ]; then
         echo "  steam-jupiter not found at $steam_jupiter (not a Steam Deck)"
         return 0
     fi
+
+    ld_audit=$(get_ld_audit)
 
     echo "  Patching steam-jupiter at $steam_jupiter..."
 
@@ -183,9 +215,6 @@ patch_steam_jupiter() {
         sudo cp "$steam_jupiter" "${steam_jupiter}.bak"
         echo "  Backup created: ${steam_jupiter}.bak"
     fi
-
-    # Hardcoded order: library-inject.so must be first for LD_AUDIT
-    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 
     # Check if already patched
     if grep -q "LD_AUDIT.*SLSsteam" "$steam_jupiter" 2>/dev/null; then
@@ -209,17 +238,15 @@ patch_steam_jupiter() {
 patch_steam_sh() {
     local steam_dir
     steam_dir=$(get_steam_dir)
-    local sls_dir
-    sls_dir=$(get_sls_install_dir)
     local steam_sh="$steam_dir/steam.sh"
+    local ld_audit
 
     if [ ! -f "$steam_sh" ]; then
         echo "  steam.sh not found at $steam_sh"
         return 0
     fi
 
-    # Hardcoded order: library-inject.so must be first for LD_AUDIT
-    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
+    ld_audit=$(get_ld_audit)
 
     # Check if already patched (use simpler grep pattern)
     if grep -q "LD_AUDIT.*SLSsteam" "$steam_sh" 2>/dev/null; then
@@ -247,18 +274,8 @@ finalize_steam() {
         echo "  Removed steam.cfg"
     fi
 
-    # Kill Steam if running (check for both native, flatpak, and Steam Deck)
-    local steam_pids
-    steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
-    if [ -z "$steam_pids" ] && [ -d "$FLATPAK_STEAM_DIR" ]; then
-        steam_pids=$(pgrep -f "com.valvesoftware.Steam" 2>/dev/null || true)
-    fi
-
-    if [ -n "$steam_pids" ]; then
-        echo "  Closing Steam..."
-        echo "$steam_pids" | xargs kill 2>/dev/null || true
-        sleep 2
-    fi
+    # Close Steam gracefully (tries steam://exit first, then kill)
+    close_steam
 
     # For Steam Deck: Don't run Steam here, just prepare for patching
     # Gaming Mode uses steam-jupiter which needs to be patched after Steam closes
@@ -270,8 +287,7 @@ finalize_steam() {
             steam &
             RUN_STEAM_PID=$!
             sleep 10
-            kill $RUN_STEAM_PID 2>/dev/null || true
-            sleep 2
+            close_steam
         fi
     else
         # For non-Steam Deck: Run Steam with SLSsteam (allows Steam to update if needed)
@@ -299,17 +315,8 @@ finalize_steam() {
         # Give Steam time to update
         sleep 30
 
-        # Force close Steam
-        steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
-        if [ -z "$steam_pids" ] && [ -d "$FLATPAK_STEAM_DIR" ]; then
-            steam_pids=$(pgrep -f "com.valvesoftware.Steam" 2>/dev/null || true)
-        fi
-
-        if [ -n "$steam_pids" ]; then
-            echo "  Closing Steam..."
-            echo "$steam_pids" | xargs kill 2>/dev/null || true
-            sleep 2
-        fi
+        # Close Steam gracefully
+        close_steam
 
         # Also kill the background run we started
         kill $RUN_STEAM_PID 2>/dev/null || true
@@ -383,10 +390,31 @@ is_steam_deck() {
 
 # Function to get LD_AUDIT string from SLSsteam files
 get_ld_audit() {
-    local sls_dir
+    local inject so_file sls_dir
+
+    # Check for repo install first (system-wide)
+    # Look for library-inject.so first, then SLSsteam.so (order matters!)
+    inject=$(find "$REPO_SLS_LOCATION" -name "*library-inject*.so" -type f 2>/dev/null | head -1)
+    so_file=$(find "$REPO_SLS_LOCATION" -name "*SLSsteam.so" ! -name "*library-inject*" -type f 2>/dev/null | head -1)
+
+    if [ -n "$inject" ] && [ -n "$so_file" ]; then
+        echo "$inject:$so_file"
+        return 0
+    fi
+
+    # Fallback to local/flatpak install
     sls_dir=$(get_sls_install_dir)
     # Hardcoded order: library-inject.so must be first for LD_AUDIT
     echo "$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
+}
+
+# Function to check if SLSsteam is installed in repo
+is_repo_install() {
+    # Check for either naming convention
+    [ -f "$REPO_SLS_LOCATION/libSLSsteam.so" ] || \
+    [ -f "$REPO_SLS_LOCATION/SLSsteam.so" ] || \
+    [ -f "$REPO_SLS_LOCATION/libSLS-library-inject.so" ] || \
+    [ -f "$REPO_SLS_LOCATION/library-inject.so" ]
 }
 
 # Function to configure SLSsteam injection
@@ -396,10 +424,17 @@ configure_slssteam_injection() {
     local steam_script
     local ld_audit
 
-    # Check if SLSsteam is installed
-    if [[ ! -d "$sls_dir" ]]; then
+    # Check for repo install first
+    if is_repo_install; then
+        echo "  Repo install detected"
+        ld_audit=$(get_ld_audit)
+    elif [[ ! -d "$sls_dir" ]]; then
         echo "Warn: SLSsteam directory not found"
         return 1
+    else
+        echo "  Found: $sls_dir/library-inject.so"
+        echo "  Found: $sls_dir/SLSsteam.so"
+        ld_audit=$(get_ld_audit)
     fi
 
     # Check if Steam executable is available (warning only)
@@ -408,11 +443,6 @@ configure_slssteam_injection() {
         echo "SLSsteam injection will be skipped. Re-run after installing Steam."
         return 0
     fi
-
-    # Hardcoded order: library-inject.so must be first for LD_AUDIT
-    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
-    echo "  Found: $sls_dir/library-inject.so"
-    echo "  Found: $sls_dir/SLSsteam.so"
 
     echo "Configuring SLSsteam injection in $steam_script..."
 
@@ -528,15 +558,18 @@ install_slssteam() {
             echo "  Bazzite detected - skipping dependency installation (packages are in base image)"
             ;;
         fedora)
-            SLS_PACKAGES="git libnotify curl libcurl-devel openssl-devel libcrypto-devel 7zip p7zip-plugins"
+            # 32-bit multilib: glibc, OpenSSL, curl
+            SLS_PACKAGES="glibc.i686 openssl.i686 libcurl.i686 7zip p7zip-plugins"
             install_packages_one_by_one "$SLS_PACKAGES" "$FAMILY"
             ;;
         debian)
-            SLS_PACKAGES="git libnotify-bin curl 7zip-full libcurl4-openssl-dev libcurl4 libcurl4:i386 libcurl libcurl:i386 libssl3 libssl-dev libcrypto++6 libcrypto++-dev libxcb-cursor0"
+            # 32-bit multiarch (i386): glibc, OpenSSL, curl
+            SLS_PACKAGES="libc6:i386 libssl3:i386 libcurl4:i386 7zip-full"
             install_packages_one_by_one "$SLS_PACKAGES" "$FAMILY"
             ;;
         arch)
-            SLS_PACKAGES="git libnotify curl 7zip"
+            # 32-bit multilib: glibc, OpenSSL, curl
+            SLS_PACKAGES="lib32-glibc lib32-openssl lib32-curl p7zip"
             install_packages_one_by_one "$SLS_PACKAGES" "$FAMILY"
             ;;
     esac
@@ -548,12 +581,6 @@ install_slssteam() {
             sudo dpkg --add-architecture i386
             sudo apt update || true
         fi
-    fi
-
-    # Remove old libcurl symlink if exists
-    if [ -d "$STEAM_LIB_DIR" ]; then
-        rm -f "$STEAM_LIB_DIR/libcurl.so"*
-        echo "Old libcurl symlinks removed."
     fi
 
     # Check if 7z is installed, try unzip as fallback
@@ -633,23 +660,11 @@ install_slssteam() {
         return 0
     fi
 
-    # Check if Steam is running and warn user
+    # Check if Steam is running and close gracefully
     STEAM_PID=$(pgrep -x "steam" 2>/dev/null || true)
     if [ -n "$STEAM_PID" ]; then
-        echo -e "${YELLOW}Steam is running. Please close Steam manually.${NC}"
-        if [ -t 0 ]; then
-            echo "Press Enter after closing Steam..."
-            read -r
-            STEAM_PID=$(pgrep -x "steam" 2>/dev/null || true)
-            while [ -n "$STEAM_PID" ]; do
-                echo "Steam is still running. Please close it."
-                sleep 2
-                STEAM_PID=$(pgrep -x "steam" 2>/dev/null || true)
-            done
-        else
-            echo "Restart Steam after installation completes."
-            sleep 3
-        fi
+        echo -e "${YELLOW}Steam is running. Closing gracefully...${NC}"
+        close_steam
     fi
 
     # Create directories
