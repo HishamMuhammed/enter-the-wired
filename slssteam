@@ -130,23 +130,11 @@ run_steam_with_sls() {
         return 1
     fi
 
-    local ld_audit=""
-    while IFS= read -r so_file; do
-        if [ -n "$so_file" ]; then
-            if [ -z "$ld_audit" ]; then
-                ld_audit="$so_file"
-            else
-                ld_audit="$ld_audit:$so_file"
-            fi
-        fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 
-    if [ -n "$ld_audit" ]; then
-        LD_AUDIT="$ld_audit" $steam_exe "$@"
-    else
-        echo "  Warning: No SLSsteam .so files found, running Steam without injection" >&2
-        $steam_exe "$@"
-    fi
+    LD_AUDIT="$ld_audit" $steam_exe "$@"
+    # No fallback - hardcoded assumes files exist
 }
 
 # Function to create wrapper at /usr/local/bin/steam for Bazzite Game Mode
@@ -155,22 +143,8 @@ create_steam_wrapper() {
     sls_dir=$(get_sls_install_dir)
     local wrapper_path="/usr/local/bin/steam"
 
-    # Build LD_AUDIT string
-    local ld_audit=""
-    while IFS= read -r so_file; do
-        if [ -n "$so_file" ]; then
-            if [ -z "$ld_audit" ]; then
-                ld_audit="$so_file"
-            else
-                ld_audit="$ld_audit:$so_file"
-            fi
-        fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
-
-    if [ -z "$ld_audit" ]; then
-        echo "  Warning: No .so files found in $sls_dir, skipping wrapper creation"
-        return 0
-    fi
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 
     # Check if /usr/local/bin exists
     if [ ! -d "/usr/local/bin" ]; then
@@ -210,22 +184,8 @@ patch_steam_jupiter() {
         echo "  Backup created: ${steam_jupiter}.bak"
     fi
 
-    # Build LD_AUDIT string
-    local ld_audit=""
-    while IFS= read -r so_file; do
-        if [ -n "$so_file" ]; then
-            if [ -z "$ld_audit" ]; then
-                ld_audit="$so_file"
-            else
-                ld_audit="$ld_audit:$so_file"
-            fi
-        fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
-
-    if [ -z "$ld_audit" ]; then
-        echo "  Warning: No .so files found in $sls_dir"
-        return 1
-    fi
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 
     # Check if already patched
     if grep -q "LD_AUDIT.*SLSsteam" "$steam_jupiter" 2>/dev/null; then
@@ -258,17 +218,8 @@ patch_steam_sh() {
         return 0
     fi
 
-    # Build LD_AUDIT string
-    local ld_audit=""
-    while IFS= read -r so_file; do
-        if [ -n "$so_file" ]; then
-            if [ -z "$ld_audit" ]; then
-                ld_audit="$so_file"
-            else
-                ld_audit="$ld_audit:$so_file"
-            fi
-        fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 
     # Check if already patched (use simpler grep pattern)
     if grep -q "LD_AUDIT.*SLSsteam" "$steam_sh" 2>/dev/null; then
@@ -434,19 +385,8 @@ is_steam_deck() {
 get_ld_audit() {
     local sls_dir
     sls_dir=$(get_sls_install_dir)
-    local ld_audit=""
-
-    while IFS= read -r so_file; do
-        if [ -n "$so_file" ]; then
-            if [ -z "$ld_audit" ]; then
-                ld_audit="$so_file"
-            else
-                ld_audit="$ld_audit:$so_file"
-            fi
-        fi
-    done < <(find "$sls_dir" -maxdepth 1 -name "*.so" 2>/dev/null | sort -r)
-
-    echo "$ld_audit"
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    echo "$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
 }
 
 # Function to configure SLSsteam injection
@@ -469,23 +409,10 @@ configure_slssteam_injection() {
         return 0
     fi
 
-    # Build LD_AUDIT string from .so files
-    local so_files
-    so_files=$(find "$sls_dir" -maxdepth 1 -name "*.so" | sort)
-    if [[ -z "$so_files" ]]; then
-        echo "Warn: No .so files found in $sls_dir"
-        return 1
-    fi
-
-    ld_audit=""
-    while IFS= read -r so_file; do
-        if [[ -z "$ld_audit" ]]; then
-            ld_audit="$so_file"
-        else
-            ld_audit="$ld_audit:$so_file"
-        fi
-        echo "  Found: $so_file"
-    done <<< "$so_files"
+    # Hardcoded order: library-inject.so must be first for LD_AUDIT
+    local ld_audit="$sls_dir/library-inject.so:$sls_dir/SLSsteam.so"
+    echo "  Found: $sls_dir/library-inject.so"
+    echo "  Found: $sls_dir/SLSsteam.so"
 
     echo "Configuring SLSsteam injection in $steam_script..."
 
