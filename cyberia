@@ -47,9 +47,17 @@ install_cyberia(){
         exit 1
     fi
 
-    echo "Extracting..."
-    rm -rf "$PLUGINS_DIR/cyberia"
-    unzip -o -q "$zip_path" -d "$PLUGINS_DIR/" && mv "$PLUGINS_DIR/cyberia-v${version}" "$PLUGINS_DIR/cyberia"
+    echo "Extracting to temp directory..."
+    temp_dir=$(mktemp -d)
+    unzip -o -q "$zip_path" -d "$temp_dir"
+
+    echo "Updating plugin files..."
+    if [ -d "$PLUGINS_DIR/cyberia" ]; then
+        rsync -av "$temp_dir/cyberia-v${version}/" "$PLUGINS_DIR/cyberia/"
+    else
+        cp -r "$temp_dir/cyberia-v${version}" "$PLUGINS_DIR/cyberia"
+    fi
+    rm -rf "$temp_dir"
 
     echo "Installing dependencies..."
     source "$VENV_ACTIVATE"
