@@ -97,14 +97,20 @@ uninstall_slssteam_injection() {
         echo "  Steam Deck detected - cleaning steam-jupiter..."
         local jupiter_backup="${steam_jupiter}.bak"
         if [[ -f "$jupiter_backup" ]]; then
-            sudo cp "$jupiter_backup" "$steam_jupiter"
-            echo "    Restored original: $steam_jupiter"
-            sudo rm -f "$jupiter_backup"
+            if sudo cp "$jupiter_backup" "$steam_jupiter"; then
+                echo "    Restored original: $steam_jupiter"
+                sudo rm -f "$jupiter_backup"
+            else
+                echo -e "    ${YELLOW}Warning: Failed to restore $steam_jupiter${NC}"
+            fi
         else
             # Try to remove LD_AUDIT lines if present
             if grep -q "LD_AUDIT" "$steam_jupiter" 2>/dev/null; then
-                sudo sed -i '/^export LD_AUDIT/d' "$steam_jupiter"
-                echo "    Removed LD_AUDIT lines from $steam_jupiter"
+                if sudo sed -i '/^export LD_AUDIT/d' "$steam_jupiter"; then
+                    echo "    Removed LD_AUDIT lines from $steam_jupiter"
+                else
+                    echo -e "    ${YELLOW}Warning: Failed to modify $steam_jupiter${NC}"
+                fi
             fi
         fi
     fi
@@ -115,14 +121,20 @@ uninstall_slssteam_injection() {
 
         # Restore original steam script from backup
         if [[ -f "$steam_backup" ]]; then
-            sudo cp "$steam_backup" "$steam_script"
-            echo "  Restored original: $steam_script"
-            sudo rm -f "$steam_backup"
+            if sudo cp "$steam_backup" "$steam_script"; then
+                echo "  Restored original: $steam_script"
+                sudo rm -f "$steam_backup"
+            else
+                echo -e "  ${YELLOW}Warning: Failed to restore $steam_script${NC}"
+            fi
         else
             # Try to remove LD_AUDIT lines if present
             if grep -q "LD_AUDIT" "$steam_script" 2>/dev/null; then
-                sudo sed -i '/^export LD_AUDIT/d' "$steam_script"
-                echo "  Removed LD_AUDIT lines from $steam_script"
+                if sudo sed -i '/^export LD_AUDIT/d' "$steam_script"; then
+                    echo "  Removed LD_AUDIT lines from $steam_script"
+                else
+                    echo -e "  ${YELLOW}Warning: Failed to modify $steam_script${NC}"
+                fi
             fi
         fi
     else
@@ -144,8 +156,20 @@ uninstall_slssteam_injection() {
 
     # Also clean up any SLSsteam wrapper if it exists
     if [[ -f "/usr/local/bin/steam" ]]; then
-        sudo rm -f "/usr/local/bin/steam"
-        echo "  Removed SLSsteam wrapper from /usr/local/bin/steam"
+        if sudo rm -f "/usr/local/bin/steam"; then
+            echo "  Removed SLSsteam wrapper from /usr/local/bin/steam"
+        else
+            echo -e "  ${YELLOW}Warning: Failed to remove /usr/local/bin/steam${NC}"
+        fi
+    fi
+
+    # Clean up steam.sh (remove LD_AUDIT line added by SLSsteam)
+    local steam_sh_dir
+    if steam_sh_dir=$(find_steam_directory 2>/dev/null) && [[ -f "$steam_sh_dir/steam.sh" ]]; then
+        if grep -q "LD_AUDIT.*SLSsteam" "$steam_sh_dir/steam.sh" 2>/dev/null; then
+            sed -i '/^export LD_AUDIT.*SLSsteam/d' "$steam_sh_dir/steam.sh"
+            echo "  Cleaned LD_AUDIT from $steam_sh_dir/steam.sh"
+        fi
     fi
 }
 
@@ -155,6 +179,13 @@ echo ""
 # Uninstall SLSsteam injection first (needs sudo)
 uninstall_slssteam_injection
 echo ""
+
+# Remove steam.cfg (created by SLSsteam to block updates)
+steam_cfg_dir=$(find_steam_directory 2>/dev/null || true)
+if [[ -n "$steam_cfg_dir" ]] && [[ -f "$steam_cfg_dir/steam.cfg" ]]; then
+    rm -f "$steam_cfg_dir/steam.cfg"
+    echo "Removed steam.cfg"
+fi
 
 # Remove ACCELA
 ACCELA_DIR="$HOME/.local/share/ACCELA"
