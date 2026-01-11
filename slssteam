@@ -54,6 +54,12 @@ find_steam_executable() {
         fi
     done
 
+    # 4. Fallback to /usr/bin/steam on Bazzite (read-only but exists)
+    if [ $is_bazzite -eq 1 ] && [ -f "/usr/bin/steam" ] && [ -x "/usr/bin/steam" ]; then
+        echo "/usr/bin/steam"
+        return 0
+    fi
+
     return 1
 }
 
