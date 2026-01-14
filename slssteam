@@ -208,7 +208,7 @@ create_steam_wrapper() {
     sudo tee "$wrapper_path" > /dev/null << EOF
 #!/usr/bin/env bash
 export LD_AUDIT="$ld_audit"
-exec /usr/bin/steam "\$@"
+exec steam "\$@"
 EOF
 
     sudo chmod +x "$wrapper_path"
