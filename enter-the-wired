@@ -68,9 +68,19 @@ echo "==============================================${NC}"
 echo ""
 
 # Run fix-deps first to ensure all dependencies are installed
+# Skip on Bazzite (read-only /usr, dependencies already handled by rpm-ostree)
 echo "Installing dependencies..."
 echo "----------------------------------------------"
-source "$SCRIPT_DIR/fix-deps"
+if [ -f /etc/os-release ]; then
+    source /etc/os-release
+    if [ "$ID" = "bazzite" ]; then
+        echo "  Bazzite detected - skipping fix-deps (handled by rpm-ostree)"
+    else
+        source "$SCRIPT_DIR/fix-deps"
+    fi
+else
+    source "$SCRIPT_DIR/fix-deps"
+fi
 echo ""
 
 echo "If you have issues with missing dependencies, run:"
