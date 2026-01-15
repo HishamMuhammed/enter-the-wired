@@ -90,12 +90,13 @@ install_accela() {
 
     export PATH="$HOME/.dotnet:$PATH"
 
-    # Cleanup to avoid conflicts with previous installation attempts
-    rm -rf ACCELA-*-linux-source ACCELA-*-linux-appimage ACCELA-*-linux-binary "$TEMP_ARCHIVE"
-
     # Choose URL based on distribution
     local TEMP_ARCHIVE
     local ACCELA_URL
+    local LOCAL_ARCHIVE
+
+    # Cleanup to avoid conflicts with previous installation attempts
+    rm -rf ACCELA-*-linux-source ACCELA-*-linux-appimage ACCELA-*-linux-binary 2>/dev/null || true
 
     if is_bazzite; then
         echo "Fetching latest binary release for Bazzite..."
@@ -120,7 +121,7 @@ install_accela() {
     fi
 
     # Procurar por ACCELA*.tar.gz no diretório atual
-    LOCAL_ARCHIVE=$(find . -maxdepth 1 -name "ACCELA*.tar.gz" -type f 2>/dev/null | head -1)
+    LOCAL_ARCHIVE=$(find . -maxdepth 1 -name "ACCELA*.tar.gz" -type f 2>/dev/null | head -1 || true)
 
     if [ -n "$LOCAL_ARCHIVE" ]; then
         echo "Found local archive: $LOCAL_ARCHIVE"
