@@ -189,30 +189,41 @@ create_steam_wrapper() {
         [ "$ID" = "bazzite" ] && is_bazzite=1
     fi
 
-    # Use different wrapper path based on distro
-    local wrapper_path
-    if [ $is_bazzite -eq 1 ]; then
-        wrapper_path="/usr/local/bin/bazzite-steam"
-        echo "  Creating bazzite-steam wrapper for Bazzite..."
-    else
-        wrapper_path="/usr/local/bin/steam"
-        echo "  Creating Steam wrapper..."
-    fi
-
     if [ ! -d "/usr/local/bin" ]; then
         echo "  Creating /usr/local/bin directory..."
         sudo mkdir -p /usr/local/bin
     fi
 
-    echo "  Creating wrapper at $wrapper_path..."
-    sudo tee "$wrapper_path" > /dev/null << EOF
+    if [ $is_bazzite -eq 1 ]; then
+        # Bazzite: create TWO wrappers (one for Game Mode, one for Desktop Mode)
+        echo "  Creating steam wrapper for Game Mode..."
+        sudo tee "/usr/local/bin/steam" > /dev/null << EOF
+#!/usr/bin/env bash
+export LD_AUDIT="$ld_audit"
+exec /usr/bin/steam "\$@"
+EOF
+        sudo chmod +x "/usr/local/bin/steam"
+        echo "  Wrapper created: /usr/local/bin/steam"
+
+        echo "  Creating bazzite-steam wrapper for Desktop Mode..."
+        sudo tee "/usr/local/bin/bazzite-steam" > /dev/null << EOF
+#!/usr/bin/env bash
+export LD_AUDIT="$ld_audit"
+exec /usr/bin/steam "\$@"
+EOF
+        sudo chmod +x "/usr/local/bin/bazzite-steam"
+        echo "  Wrapper created: /usr/local/bin/bazzite-steam"
+    else
+        # Other distros: create single wrapper
+        echo "  Creating Steam wrapper..."
+        sudo tee "/usr/local/bin/steam" > /dev/null << EOF
 #!/usr/bin/env bash
 export LD_AUDIT="$ld_audit"
 exec steam "\$@"
 EOF
-
-    sudo chmod +x "$wrapper_path"
-    echo "  Wrapper created successfully"
+        sudo chmod +x "/usr/local/bin/steam"
+        echo "  Wrapper created: /usr/local/bin/steam"
+    fi
 }
 
 # Function to patch desktop/autorun files to use bazzite-steam on Bazzite
@@ -229,25 +240,35 @@ patch_steam_desktop() {
     fi
 
     local autostart_file="$HOME/.config/autostart/steam.desktop"
+    local system_autostart="/etc/xdg/autostart/steam.desktop"
     local desktop_shortcut="$HOME/.local/share/applications/steam.desktop"
+
+    # Copy autostart from system if it doesn't exist
+    if [[ ! -f "$autostart_file" ]]; then
+        if [[ -f "$system_autostart" ]]; then
+            echo "  Copying autostart file from $system_autostart..."
+            mkdir -p "$HOME/.config/autostart"
+            cp "$system_autostart" "$autostart_file"
+        fi
+    fi
 
     # Patch autostart file
     if [[ -f "$autostart_file" ]]; then
-        if grep -q "bazzite-steam" "$autostart_file" 2>/dev/null; then
-            echo "  Autostart already uses bazzite-steam"
+        if grep -q "/usr/local/bin/bazzite-steam" "$autostart_file" 2>/dev/null; then
+            echo "  Autostart already uses /usr/local/bin/bazzite-steam"
         else
-            echo "  Patching autostart to use bazzite-steam..."
-            sed -i 's|Exec=[^ ]*steam[^ ]*|Exec=bazzite-steam|g' "$autostart_file"
+            echo "  Patching autostart to use /usr/local/bin/bazzite-steam..."
+            sed -i 's|Exec=[^ ]*steam[^ ]*|Exec=/usr/local/bin/bazzite-steam|g' "$autostart_file"
         fi
     fi
 
     # Patch desktop shortcut if it exists
     if [[ -f "$desktop_shortcut" ]]; then
-        if grep -q "bazzite-steam" "$desktop_shortcut" 2>/dev/null; then
-            echo "  Desktop shortcut already uses bazzite-steam"
+        if grep -q "/usr/local/bin/bazzite-steam" "$desktop_shortcut" 2>/dev/null; then
+            echo "  Desktop shortcut already uses /usr/local/bin/bazzite-steam"
         else
-            echo "  Patching desktop shortcut to use bazzite-steam..."
-            sed -i 's|Exec=[^ ]*steam[^ ]*|Exec=bazzite-steam|g' "$desktop_shortcut"
+            echo "  Patching desktop shortcut to use /usr/local/bin/bazzite-steam..."
+            sed -i 's|Exec=[^ ]*steam[^ ]*|Exec=/usr/local/bin/bazzite-steam|g' "$desktop_shortcut"
         fi
     fi
 }
