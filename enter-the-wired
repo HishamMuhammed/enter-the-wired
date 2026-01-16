@@ -114,34 +114,12 @@ echo "----------------------------------------------"
 ENTER_THE_WIRED_DIR="$HOME/enter-the-wired"
 mkdir -p "$ENTER_THE_WIRED_DIR"
 
-# Function to download with retry
-download_script() {
-    local url="$1"
-    local output="$2"
-    local filename=$(basename "$output")
-    local max_attempts=3
-    local attempt=1
-
-    while [ $attempt -le $max_attempts ]; do
-        if curl -fsSL -o "$output" "$url" 2>/dev/null; then
-            return 0
-        fi
-        if [ $attempt -lt $max_attempts ]; then
-            echo "  Retrying download of $filename (attempt $attempt/$max_attempts)..."
-            sleep 2
-        fi
-        attempt=$((attempt + 1))
-    done
-    echo -e "${YELLOW}  Warning: Could not download $filename - continuing anyway${NC}"
-    return 0
-}
-
 # Download each script from GitHub
-download_script "https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/main/accela" "$ENTER_THE_WIRED_DIR/accela"
-download_script "https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/main/cyberia" "$ENTER_THE_WIRED_DIR/cyberia"
-download_script "https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/main/slssteam" "$ENTER_THE_WIRED_DIR/slssteam"
-download_script "https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/main/fix-deps" "$ENTER_THE_WIRED_DIR/fix-deps"
-download_script "https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/main/uninstall" "$ENTER_THE_WIRED_DIR/uninstall"
+curl -fsSL --retry 3 --retry-delay 2 -o "$ENTER_THE_WIRED_DIR/accela" "https://raw.githubusercontent.com/ciscosweater/enter-the-wired/main/accela"
+curl -fsSL --retry 3 --retry-delay 2 -o "$ENTER_THE_WIRED_DIR/cyberia" "https://raw.githubusercontent.com/ciscosweater/enter-the-wired/main/cyberia"
+curl -fsSL --retry 3 --retry-delay 2 -o "$ENTER_THE_WIRED_DIR/slssteam" "https://raw.githubusercontent.com/ciscosweater/enter-the-wired/main/slssteam"
+curl -fsSL --retry 3 --retry-delay 2 -o "$ENTER_THE_WIRED_DIR/fix-deps" "https://raw.githubusercontent.com/ciscosweater/enter-the-wired/main/fix-deps"
+curl -fsSL --retry 3 --retry-delay 2 -o "$ENTER_THE_WIRED_DIR/uninstall" "https://raw.githubusercontent.com/ciscosweater/enter-the-wired/main/uninstall"
 
 # Set execute permissions (ignore if files don't exist)
 chmod +x "$ENTER_THE_WIRED_DIR/accela" 2>/dev/null || true
