@@ -31,10 +31,6 @@ is_steam_deck() {
     [[ "${ID:-}" == "steamos" ]] || [[ "${VARIANT_ID:-}" == "steamdeck" ]]
 }
 
-is_void() {
-    [ -f /etc/os-release ] && source /etc/os-release && [ "${ID:-}" = "void" ]
-}
-
 # =============================================================================
 # STEAM DETECTION
 # =============================================================================
@@ -117,30 +113,6 @@ close_steam_graceful() {
     timeout 30 $steam_exe -clearbeta steam://exit 2>/dev/null || true
 }
 
-close_steam() {
-    local steam_pids
-
-    if close_steam_graceful; then
-        sleep 3
-        steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
-        if [ -z "$steam_pids" ]; then
-            echo "  Steam closed gracefully"
-            return 0
-        fi
-        echo "  Steam still running, force closing..."
-    fi
-
-    steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
-    if [ -n "$steam_pids" ]; then
-        echo "  Force closing Steam..."
-        echo "$steam_pids" | xargs kill 2>/dev/null || true
-        sleep 2
-    fi
-
-    steam_pids=$(pgrep -x "steam" 2>/dev/null || true)
-    [ -z "$steam_pids" ]
-}
-
 run_steam_with_sls() {
     local steam_exe
 
@@ -149,7 +121,9 @@ run_steam_with_sls() {
         return 1
     }
 
-    LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so $steam_exe "$@"
+    echo "  Starting Steam with SLSsteam..."
+    nohup env LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so "$steam_exe" > /dev/null 2>&1 &
+    disown
 }
 
 # =============================================================================
@@ -168,37 +142,6 @@ patch_steam_sh() {
 
     sed -i '10a export LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so' "$steam_sh"
     echo "  Patched steam.sh at $steam_sh"
-}
-
-# Steam Deck only: patch steam-jupiter for Gaming Mode
-patch_steam_jupiter() {
-    local -r steam_jupiter="/usr/bin/steam-jupiter"
-
-    [ -f "$steam_jupiter" ] || {
-        echo "  steam-jupiter not found"
-        return 1
-    }
-
-    echo "  Patching steam-jupiter at $steam_jupiter..."
-
-    if [ ! -f "${steam_jupiter}.bak" ]; then
-        sudo cp "$steam_jupiter" "${steam_jupiter}.bak"
-        echo "  Backup created: ${steam_jupiter}.bak"
-    fi
-
-    if grep -q "LD_AUDIT.*SLSsteam" "$steam_jupiter" 2>/dev/null; then
-        echo "  steam-jupiter already patched, updating..."
-        sudo sed -i '/^export LD_AUDIT.*SLSsteam/d' "$steam_jupiter"
-    fi
-
-    if grep -q 'exec /usr/lib/steam/steam -steamdeck' "$steam_jupiter" 2>/dev/null; then
-        sudo sed -i '/^exec \/usr\/lib\/steam\/steam -steamdeck/i export LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so' "$steam_jupiter"
-        echo "  Patched steam-jupiter with LD_AUDIT"
-    else
-        sudo sed -i '/^exec.*steam.*"-steamdeck"/i export LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so' "$steam_jupiter" 2>/dev/null || \
-        sudo sed -i '/^exec.*steam/i export LD_AUDIT=$HOME/.local/share/SLSsteam/library-inject.so:$HOME/.local/share/SLSsteam/SLSsteam.so' "$steam_jupiter" 2>/dev/null || true
-        echo "  Applied fallback patch to steam-jupiter"
-    fi
 }
 
 # Bazzite only: patch desktop files to use wrapper
@@ -329,18 +272,9 @@ configure_slssteam_injection() {
         echo "  PlayNotOwnedGames enabled"
     fi
 
-    # Steam Deck: patch steam-jupiter, enable SafeMode
+    # Steam Deck: enable SafeMode
     if is_steam_deck; then
         echo "  Steam Deck detected"
-
-        if [ -f "/usr/bin/steam-jupiter" ]; then
-            echo ""
-            echo -e "${GREEN}Patching steam-jupiter for Gaming Mode...${NC}"
-            patch_steam_jupiter
-        else
-            echo -e "${YELLOW}Warning: steam-jupiter not found${NC}"
-        fi
-
         # Enable SafeMode on Steam Deck
         if [ -f "$config_file" ]; then
             if grep -q "^SafeMode:" "$config_file" 2>/dev/null; then
@@ -370,42 +304,29 @@ configure_slssteam_injection() {
 }
 
 # =============================================================================
-# FINALIZATION
+# PREPARATION (formerly finalize_steam)
 # =============================================================================
 
-finalize_steam() {
+prepare_steam() {
     local steam_dir steam_cfg
     steam_dir=$(find_steam_directory) || steam_dir="$HOME/.steam/steam"
     steam_cfg="$steam_dir/steam.cfg"
 
-    echo "Finalizing Steam configuration..."
+    echo "Preparing Steam for installation..."
 
+    # Remove steam.cfg to force update
     [ -f "$steam_cfg" ] && rm -f "$steam_cfg" && echo "  Removed steam.cfg"
 
+    # Close Steam gracefully to allow update (without SLS)
     if close_steam_graceful; then
-        echo "  Steam will close and update via steam://exit"
+        echo "  Steam closing for update..."
     elif is_steam_deck; then
         echo "  Steam Deck detected - will patch steam-jupiter for Gaming Mode"
     else
-        echo "  Steam not found, opening to check for updates..."
-        if command -v steam &>/dev/null; then
-            run_steam_with_sls &
-            local run_steam_pid=$!
-            sleep 5
-
-            local attempts=0
-            while [ $attempts -lt 12 ]; do
-                pgrep -x "steam" &>/dev/null && break
-                sleep 1
-                attempts=$((attempts + 1))
-            done
-
-            sleep 30
-            close_steam
-            kill $run_steam_pid 2>/dev/null || true
-        fi
+        echo "  Steam not found, will open Steam after installation"
     fi
 
+    # Create steam.cfg to skip self-update on next launch
     cat > "$steam_cfg" << 'EOF'
 BootStrapperInhibitAll=enable
 BootStrapperForceSelfUpdate=disable
@@ -421,8 +342,27 @@ install_slssteam() {
     echo -e "${GREEN}Installing SLSsteam...${NC}"
     echo ""
 
-    # Clean up any existing LD_AUDIT patches before installing
+    # 1. Clean up old patches
+    echo ""
+    echo -e "${GREEN}Cleaning up existing patches...${NC}"
     cleanup_ld_audit
+
+    # 2. PREPARATION - close Steam and open for update (without SLS)
+    prepare_steam
+
+    # 3. Check if Steam closed
+    local steam_pid
+    steam_pid=$(pgrep -x "steam" 2>/dev/null || true)
+    if [ -n "$steam_pid" ]; then
+        echo "  Steam still running, waiting..."
+        sleep 10
+        steam_pid=$(pgrep -x "steam" 2>/dev/null || true)
+        if [ -n "$steam_pid" ]; then
+            echo -e "${RED}Error: Steam is still running${NC}"
+            echo "Please close Steam completely before running this script."
+            exit 1
+        fi
+    fi
 
     local slssteam_install_dir slssteam_config_dir steam_dir
     slssteam_install_dir=$(get_sls_install_dir)
@@ -436,18 +376,6 @@ install_slssteam() {
         return 0
     }
 
-    # Check if Steam is running
-    local steam_pid
-    steam_pid=$(pgrep -x "steam" 2>/dev/null || true)
-    if [ -n "$steam_pid" ]; then
-        echo -e "${RED}Error: Steam is currently running${NC}"
-        echo ""
-        echo "Please close Steam completely before running this script."
-        echo "After closing Steam, run this script again."
-        echo ""
-        exit 1
-    fi
-
     # Create directories
     mkdir -p "$slssteam_install_dir" "$slssteam_config_dir"
 
@@ -457,7 +385,8 @@ install_slssteam() {
         echo "Config backup created."
     fi
 
-    # Download
+    # 4. Download and extract SLSsteam
+    echo ""
     echo "Downloading SLSsteam..."
     local release_json temp_sls="/tmp/slssteam.7z"
     release_json=$(curl -s "https://api.github.com/repos/AceSLS/SLSsteam/releases/latest")
@@ -521,26 +450,26 @@ install_slssteam() {
     cd ~ 2>/dev/null || cd / 2>/dev/null || true
     rm -rf /tmp/slssteam_extract "$temp_sls"
 
-    # Finalization
-    echo ""
-    echo -e "${GREEN}Finalizing Steam configuration...${NC}"
-    finalize_steam
-
-    # Configure injection based on system type
+    # 5. Configure injection
     echo ""
     echo -e "${GREEN}Configuring SLSsteam injection...${NC}"
     configure_slssteam_injection
 
-    # Patch steam.sh if it exists (all systems except Bazzite)
+    # 6. Patch steam.sh (all systems except Bazzite)
     if ! is_bazzite && ([ -f "$HOME/.steam/steam/steam.sh" ] || [ -f "$HOME/.local/share/Steam/steam.sh" ]); then
         echo ""
         echo -e "${GREEN}Patching steam.sh...${NC}"
         patch_steam_sh
     fi
 
+    # 7. FINAL OPEN - open Steam WITH SLS
+    echo ""
+    echo -e "${GREEN}Starting Steam with SLSsteam...${NC}"
+    run_steam_with_sls
+
     echo ""
     echo "SLSsteam installed and configured successfully!"
-    echo "Just open Steam normally to play."
+    echo "Enjoy your games!"
 }
 
 install_slssteam "$@"
