@@ -196,7 +196,8 @@ function Install-GreenLumaWindows {
     Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
 
     # Run DeleteSteamAppCache.exe
-    $deleteCacheExe = Join-Path $tempDir "StealthMode" "DeleteSteamAppCache.exe"
+    $stealthModeDir = Join-Path $tempDir "StealthMode"
+    $deleteCacheExe = Join-Path $stealthModeDir "DeleteSteamAppCache.exe"
     if (Test-Path $deleteCacheExe) {
         Write-Status "Running DeleteSteamAppCache.exe..." -Type Info
         Start-Process -FilePath $deleteCacheExe -Wait
