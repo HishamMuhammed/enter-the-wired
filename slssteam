@@ -110,7 +110,7 @@ close_steam_graceful() {
     }
 
     echo "  Closing Steam gracefully via steam://exit..."
-    timeout 30 $steam_exe -clearbeta steam://exit 2>/dev/null || true
+    $steam_exe -clearbeta steam://exit 2>/dev/null || true
 }
 
 run_steam_with_sls() {
