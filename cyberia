@@ -41,7 +41,7 @@ install_cyberia(){
     plugin_dir="$PLUGINS_DIR/cyberia"
 
     echo "Downloading Cyberia ${latest_tag}..."
-    if ! wget -q --show-progress "https://github.com/ciscosweater/cyberia/releases/download/${latest_tag}/cyberia-v${version}.zip" -O "$zip_path"; then
+    if ! curl -fsSL --progress-bar "https://github.com/ciscosweater/cyberia/releases/download/${latest_tag}/cyberia-v${version}.zip" -o "$zip_path"; then
         echo "Failed to download Cyberia."
         exit 1
     fi
