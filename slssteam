@@ -317,13 +317,14 @@ prepare_steam() {
         echo "2. Click the 'Steam' button in the top-left corner"
         echo "3. Select 'Check for Steam Client Updates'"
         echo "4. Wait for the update to complete"
-        echo "5. Run this script again after updating"
+        echo "5. Close Steam completely"
+        echo "6. Run this script again after updating"
         echo ""
         echo "IMPORTANT: Make sure Steam is NOT in Beta mode"
         echo "  - Go to Steam > Settings > Interface"
         echo "  - Uncheck 'Participate in beta programs'"
         echo ""
-        echo "Installation cancelled. Please run again after updating Steam."
+        echo "Installation cancelled. Please run again after updating and closing Steam."
         exit 0
     fi
 
