@@ -30,19 +30,6 @@ is_steamos() {
     return 1
 }
 
-# Check if running on Bazzite (uses binary)
-is_bazzite() {
-    if [ -f /etc/os-release ]; then
-        source /etc/os-release
-        [[ "$ID" == "bazzite" ]] && return 0
-    fi
-    return 1
-}
-
-is_void() {
-    [ -f /etc/os-release ] && source /etc/os-release && [ "${ID:-}" = "void"]
-}
-
 # Fetch latest ACCELA release from GitHub API
 get_latest_release() {
     local asset_type="$1"
@@ -65,9 +52,6 @@ get_latest_release() {
             ;;
         appimage)
             echo "$release_info" | grep -o '"browser_download_url": *"[^"]*ACCELA-[^"]*-linux-appimage\.tar\.gz"' | head -1 | sed 's/"browser_download_url": *"\(.*\)"/\1/'
-            ;;
-        binary)
-            echo "$release_info" | grep -o '"browser_download_url": *"[^"]*ACCELA-[^"]*-linux-binary\.tar\.gz"' | head -1 | sed 's/"browser_download_url": *"\(.*\)"/\1/'
             ;;
         *)
             echo ""
@@ -100,18 +84,13 @@ install_accela() {
     local LOCAL_ARCHIVE
 
     # Cleanup to avoid conflicts with previous installation attempts
-    rm -rf ACCELA-*-linux-source ACCELA-*-linux-appimage ACCELA-*-linux-binary 2>/dev/null || true
+    rm -rf ACCELA-*-linux-source ACCELA-*-linux-appimage 2>/dev/null || true
 
-    if is_bazzite; then
-        echo "Fetching latest binary release for Bazzite..."
-        ACCELA_URL=$(get_latest_release "binary")
-        TEMP_ARCHIVE="accela_binary.tar.gz"
-        echo "Using binary for Bazzite..."
-    elif is_steamos; then
-        echo "Fetching latest AppImage release for SteamOS..."
+    if is_steamos || is_bazzite; then
+        echo "Fetching latest AppImage release for SteamOS/Bazzite..."
         ACCELA_URL=$(get_latest_release "appimage")
         TEMP_ARCHIVE="accela_appimage.tar.gz"
-        echo "Using AppImage for SteamOS..."
+        echo "Using AppImage..."
     else
         echo "Fetching latest source release..."
         ACCELA_URL=$(get_latest_release "source")
@@ -124,7 +103,6 @@ install_accela() {
         return 1
     fi
 
-    # Procurar por ACCELA*.tar.gz no diretório atual
     LOCAL_ARCHIVE=$(find . -maxdepth 1 -name "ACCELA*.tar.gz" -type f 2>/dev/null | head -1 || true)
 
     if [ -n "$LOCAL_ARCHIVE" ]; then

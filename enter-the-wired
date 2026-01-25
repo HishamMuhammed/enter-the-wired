@@ -75,9 +75,6 @@ if [ -f /etc/os-release ]; then
     source /etc/os-release
     if [ "$ID" = "bazzite" ]; then
         echo "  Bazzite detected - skipping fix-deps (handled by rpm-ostree)"
-    elif [ "$ID" = "void" ]; then
-        echo "  Void Linux detected - skipping auto fix-deps."
-        echo "  Please ensure dependencies (git, curl, tar, python3) are installed."
     else
         source "$SCRIPT_DIR/fix-deps"
     fi
@@ -154,7 +151,7 @@ echo "  If you have missing dependencies or ran into issues trying to use ACCELA
 echo "  ~/enter-the-wired/fix-deps"
 echo ""
 echo -e "${YELLOW}About Cyberia:${NC}"
-echo "  cyberia installs the Millennium framework and the Cyberia plugin,"
+echo "  Cyberia installs the Millennium framework and the Cyberia plugin,"
 echo "  which integrates ACCELA directly into the Steam client."
 echo ""
 echo "Protocol complete. Welcome to the Wired."
