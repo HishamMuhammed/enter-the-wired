@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+info() { printf "\033[1;34m[INFO]\033[0m %s\n" "$*"; }
+warn() { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
+err() { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*"; }
+
+REPO_ROOT=$(cd "$(dirname "$0")" && pwd)
+SRC_BIN="$REPO_ROOT/ludusavi/ludusavi"
+SRC_RCLONE="$REPO_ROOT/ludusavi/rclone/rclone"
+SRC_SERVICE="$REPO_ROOT/ludusavi/ludusavi-backup.service"
+SRC_TIMER="$REPO_ROOT/ludusavi/ludusavi-backup.timer"
+
+# Embedded systemd unit templates (used as fallback if external files are missing)
+SERVICE_CONTENT=$(cat <<'EOF'
+[Unit]
+Description=Ludusavi automatic game saves backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/ludusavi/ludusavi backup --force
+EOF
+)
+
+TIMER_CONTENT=$(cat <<'EOF'
+[Unit]
+Description=Run Ludusavi backup automatically
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+)
+
+DEST_HOME="$HOME"
+DEST_APP_DIR="$DEST_HOME/ludusavi"
+DEST_LOCAL_BIN="$DEST_HOME/.local/bin"
+DEST_SYSTEMD_USER_DIR="$DEST_HOME/.config/systemd/user"
+CONFIG_DIR="$DEST_HOME/.config/ludusavi"
+
+# Ensure ~/.local/bin exists early for symlinks
+mkdir -p "$DEST_LOCAL_BIN"
+
+ensure_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { warn "command '$1' not found; some steps may fail"; }
+}
+
+detect_basic_tools() {
+  ensure_cmd cp
+  ensure_cmd mkdir
+  ensure_cmd sed
+  ensure_cmd curl
+  ensure_cmd tar
+  ensure_cmd unzip || true
+  ensure_cmd systemctl || true
+}
+
+install_binary() {
+  local src="$1" dest_dir="$2" dest_path
+  [ -f "$src" ] || { warn "source $src not found; skipping"; return 0; }
+  mkdir -p "$dest_dir"
+  dest_path="$dest_dir/$(basename "$src")"
+  if [ -f "$dest_path" ]; then
+    if cmp -s "$src" "$dest_path"; then
+      info "$dest_path already up-to-date"
+      return 0
+    else
+      mv "$dest_path" "$dest_path.bak.$(date +%s)" || true
+      info "backed up existing $dest_path"
+    fi
+  fi
+  cp -a "$src" "$dest_path"
+  chmod +x "$dest_path"
+  info "installed $dest_path"
+}
+
+fetch_and_install_latest_release() {
+  local owner_repo="mtkennerly/ludusavi"
+  local api_url="https://api.github.com/repos/${owner_repo}/releases/latest"
+  local arch
+  arch=$(uname -m || echo x86_64)
+  local arch_pattern
+  case "$arch" in
+    x86_64|x86-64|amd64) arch_pattern="x86_64|amd64|linux64|linux-x86_64" ;;
+    aarch64|arm64) arch_pattern="aarch64|arm64|linux-arm64|linux-aarch64" ;;
+    *) arch_pattern="linux" ;;
+  esac
+
+  info "Querying GitHub for latest release of ${owner_repo}"
+  local urls
+  if command -v curl >/dev/null 2>&1; then
+    urls=$(curl -sSfL "$api_url" | grep -Eo '"browser_download_url": *"[^"]+"' | sed -E 's/.*"([^"]+)".*/\1/') || urls=""
+  else
+    warn "curl not available; cannot fetch latest release"
+    return 1
+  fi
+
+  if [ -z "$urls" ]; then
+    warn "no release assets found via GitHub API"
+    return 1
+  fi
+
+  # prefer assets that include 'linux' and arch pattern
+  local selected_url
+  selected_url=$(printf "%s\n" "$urls" | grep -Ei linux | grep -Ei "$arch_pattern" | head -n1 || true)
+  if [ -z "$selected_url" ]; then
+    selected_url=$(printf "%s\n" "$urls" | grep -Ei linux | head -n1 || true)
+  fi
+  if [ -z "$selected_url" ]; then
+    selected_url=$(printf "%s\n" "$urls" | head -n1)
+  fi
+
+  if [ -z "$selected_url" ]; then
+    warn "could not select a release asset URL"
+    return 1
+  fi
+
+  info "selected asset: $selected_url"
+  local tmpd
+  tmpd=$(mktemp -d)
+  local filename="$tmpd/asset"
+  info "downloading asset to $filename"
+  if ! curl -L -o "$filename" "$selected_url"; then
+    warn "failed to download asset"
+    rm -rf "$tmpd"
+    return 1
+  fi
+
+  mkdir -p "$DEST_APP_DIR"
+
+  # try to extract binary from archive
+  if file "$filename" | grep -qi 'gzip\|tar\|zstd'; then
+    # Handle .tar.zst, .tar.gz, .tar.xz
+    if command -v zstd >/dev/null 2>&1; then
+      tar -I zstd -xf "$filename" -C "$tmpd" 2>/dev/null || tar -xzf "$filename" -C "$tmpd" || true
+    else
+      tar -xzf "$filename" -C "$tmpd" 2>/dev/null || tar -xf "$filename" -C "$tmpd" || true
+    fi
+    # find executable named 'ludusavi'
+    local found
+    found=$(find "$tmpd" -type f -name ludusavi -perm /u+x 2>/dev/null | head -n1 || true)
+    if [ -n "$found" ]; then
+      if [ -f "$DEST_APP_DIR/ludusavi" ]; then
+        mv "$DEST_APP_DIR/ludusavi" "$DEST_APP_DIR/ludusavi.bak.$(date +%s)" || true
+      fi
+      mv "$found" "$DEST_APP_DIR/ludusavi"
+      chmod +x "$DEST_APP_DIR/ludusavi"
+      info "installed $DEST_APP_DIR/ludusavi from archive"
+      rm -rf "$tmpd"
+      return 0
+    fi
+  fi
+
+  # zip
+  if file "$filename" | grep -qi 'Zip archive data'; then
+    unzip -q "$filename" -d "$tmpd" || true
+    local found
+    found=$(find "$tmpd" -type f -name ludusavi -perm /u+x 2>/dev/null | head -n1 || true)
+    if [ -n "$found" ]; then
+      if [ -f "$DEST_APP_DIR/ludusavi" ]; then
+        mv "$DEST_APP_DIR/ludusavi" "$DEST_APP_DIR/ludusavi.bak.$(date +%s)" || true
+      fi
+      mv "$found" "$DEST_APP_DIR/ludusavi"
+      chmod +x "$DEST_APP_DIR/ludusavi"
+      info "installed $DEST_APP_DIR/ludusavi from zip"
+      rm -rf "$tmpd"
+      return 0
+    fi
+  fi
+
+  # AppImage or raw binary
+  if [ -s "$filename" ]; then
+    # assume it's an executable
+    if [ -f "$DEST_APP_DIR/ludusavi" ]; then
+      mv "$DEST_APP_DIR/ludusavi" "$DEST_APP_DIR/ludusavi.bak.$(date +%s)" || true
+    fi
+    mv "$filename" "$DEST_APP_DIR/ludusavi"
+    chmod +x "$DEST_APP_DIR/ludusavi"
+    info "installed $DEST_APP_DIR/ludusavi (downloaded asset)"
+    rm -rf "$tmpd" || true
+    return 0
+  fi
+
+  warn "failed to extract or move ludusavi from downloaded asset"
+  rm -rf "$tmpd"
+  return 1
+}
+
+fetch_and_install_latest_rclone() {
+  local owner_repo="rclone/rclone"
+  local api_url="https://api.github.com/repos/${owner_repo}/releases/latest"
+  local arch
+  arch=$(uname -m || echo x86_64)
+  local arch_pattern
+  case "$arch" in
+    x86_64|x86-64|amd64) arch_pattern="amd64|x86_64|linux-amd64|linux64" ;;
+    aarch64|arm64) arch_pattern="arm64|aarch64|linux-arm64|linux-aarch64" ;;
+    *) arch_pattern="linux" ;;
+  esac
+
+  info "Querying GitHub for latest release of ${owner_repo}"
+  local urls
+  urls=$(curl -sSfL "$api_url" | grep -Eo '"browser_download_url": *"[^"]+"' | sed -E 's/.*"([^"]+)".*/\1/') || urls=""
+  if [ -z "$urls" ]; then
+    warn "no release assets found for ${owner_repo}"
+    return 1
+  fi
+
+  # prefer zip/tar assets that include 'linux' and arch pattern
+  local selected_url
+  selected_url=$(printf "%s\n" "$urls" | grep -Ei linux | grep -Ei "$arch_pattern" | grep -Ei '\.zip$|\.tar\.xz$|\.tar\.gz$' | head -n1 || true)
+  if [ -z "$selected_url" ]; then
+    selected_url=$(printf "%s\n" "$urls" | grep -Ei linux | grep -Ei '\.zip$|\.tar\.xz$|\.tar\.gz$' | head -n1 || true)
+  fi
+  if [ -z "$selected_url" ]; then
+    selected_url=$(printf "%s\n" "$urls" | grep -Ei linux | head -n1 || true)
+  fi
+  if [ -z "$selected_url" ]; then
+    selected_url=$(printf "%s\n" "$urls" | head -n1 || true)
+  fi
+
+  info "selected rclone asset: $selected_url"
+  local tmpd
+  tmpd=$(mktemp -d)
+  local filename="$tmpd/asset"
+  if ! curl -L -o "$filename" "$selected_url"; then
+    warn "failed to download rclone asset"
+    rm -rf "$tmpd"
+    return 1
+  fi
+
+  mkdir -p "$DEST_APP_DIR"
+
+  # extract zip
+  if file "$filename" | grep -qi 'Zip archive data'; then
+    unzip -q "$filename" -d "$tmpd" || true
+    local found
+    found=$(find "$tmpd" -type f -name rclone -perm /u+x 2>/dev/null | head -n1 || true)
+    if [ -n "$found" ]; then
+      mv "$found" "$DEST_APP_DIR/rclone"
+      chmod +x "$DEST_APP_DIR/rclone"
+      ln -sf "$DEST_APP_DIR/rclone" "$DEST_LOCAL_BIN/rclone"
+      info "installed rclone to $DEST_APP_DIR/rclone and symlinked to $DEST_LOCAL_BIN/rclone"
+      rm -rf "$tmpd"
+      return 0
+    fi
+  fi
+
+  # extract tar.* archives
+  if file "$filename" | grep -Ei 'gzip|xz|tar' >/dev/null 2>&1; then
+    tar -xf "$filename" -C "$tmpd" || true
+    local found
+    found=$(find "$tmpd" -type f -name rclone -perm /u+x 2>/dev/null | head -n1 || true)
+    if [ -n "$found" ]; then
+      mv "$found" "$DEST_APP_DIR/rclone"
+      chmod +x "$DEST_APP_DIR/rclone"
+      ln -sf "$DEST_APP_DIR/rclone" "$DEST_LOCAL_BIN/rclone"
+      info "installed rclone to $DEST_APP_DIR/rclone and symlinked to $DEST_LOCAL_BIN/rclone"
+      rm -rf "$tmpd"
+      return 0
+    fi
+  fi
+
+  # fallback: assume raw executable
+  if [ -s "$filename" ]; then
+    mv "$filename" "$DEST_APP_DIR/rclone"
+    chmod +x "$DEST_APP_DIR/rclone"
+    ln -sf "$DEST_APP_DIR/rclone" "$DEST_LOCAL_BIN/rclone"
+    info "installed rclone to $DEST_APP_DIR/rclone and symlinked to $DEST_LOCAL_BIN/rclone"
+    rm -rf "$tmpd" || true
+    return 0
+  fi
+
+  warn "failed to extract or install rclone from downloaded asset"
+  rm -rf "$tmpd"
+  return 1
+}
+
+install_systemd_user_units() {
+  mkdir -p "$DEST_SYSTEMD_USER_DIR"
+
+  # Install service unit: prefer repository file, otherwise use embedded template
+  if [ -f "$SRC_SERVICE" ]; then
+    # fix common duplicate ExecStart=ExecStart=/ bug if present
+    sed 's/ExecStart=ExecStart=/ExecStart=/' "$SRC_SERVICE" > "$DEST_SYSTEMD_USER_DIR/$(basename "$SRC_SERVICE")"
+    info "installed $(basename "$SRC_SERVICE") from repository to $DEST_SYSTEMD_USER_DIR"
+  else
+    # write embedded service content
+    printf "%s\n" "$SERVICE_CONTENT" | sed 's/ExecStart=ExecStart=/ExecStart=/' > "$DEST_SYSTEMD_USER_DIR/ludusavi-backup.service"
+    info "wrote embedded ludusavi-backup.service to $DEST_SYSTEMD_USER_DIR"
+  fi
+
+  # Install timer unit: prefer repository file, otherwise use embedded template
+  if [ -f "$SRC_TIMER" ]; then
+    cp -a "$SRC_TIMER" "$DEST_SYSTEMD_USER_DIR/"
+    info "installed $(basename "$SRC_TIMER") from repository to $DEST_SYSTEMD_USER_DIR"
+  else
+    printf "%s\n" "$TIMER_CONTENT" > "$DEST_SYSTEMD_USER_DIR/ludusavi-backup.timer"
+    info "wrote embedded ludusavi-backup.timer to $DEST_SYSTEMD_USER_DIR"
+  fi
+
+  info "installed systemd user units to $DEST_SYSTEMD_USER_DIR"
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl --user daemon-reload >/dev/null 2>&1; then
+      info "reloaded systemd --user daemon"
+      if systemctl --user enable --now ludusavi-backup.timer >/dev/null 2>&1; then
+        info "enabled and started ludusavi-backup.timer"
+      else
+        warn "could not enable/start ludusavi-backup.timer automatically; run: systemctl --user enable --now ludusavi-backup.timer"
+      fi
+    else
+      warn "could not reload systemd --user; you may need to enable user systemd or run the commands manually"
+    fi
+  else
+    warn "systemctl not available; unit files were copied but not enabled"
+  fi
+}
+
+create_config_dir() {
+  if [ -d "$CONFIG_DIR" ]; then
+    info "config dir $CONFIG_DIR already exists"
+  else
+    mkdir -p "$CONFIG_DIR"
+    info "created $CONFIG_DIR"
+  fi
+}
+
+post_install_notes() {
+  printf "\n"
+  info "Next steps / validation"
+  printf "- Verify binary: %s/$(basename \"$SRC_BIN\")\n" "$DEST_APP_DIR"
+  printf "- Try: %s/$(basename \"$SRC_BIN\") --version\n" "$DEST_APP_DIR"
+  printf "- If you prefer the binary on your PATH: ln -s %s/$(basename \"$SRC_BIN\") %s/$(basename \"$SRC_BIN\")\n" "$DEST_APP_DIR" "$DEST_LOCAL_BIN"
+  printf "- Check timer: systemctl --user status ludusavi-backup.timer\n"
+}
+
+main() {
+  detect_basic_tools
+
+  info "Installing Ludusavi into $DEST_APP_DIR (user-mode)"
+  mkdir -p "$DEST_APP_DIR"
+  # fetch and install latest release binary from GitHub
+  if fetch_and_install_latest_release; then
+    info "latest release installed into $DEST_APP_DIR"
+  else
+    warn "could not fetch latest release; falling back to repository binary (if present)"
+    install_binary "$SRC_BIN" "$DEST_APP_DIR"
+  fi
+
+  # fetch and install latest rclone release
+  if fetch_and_install_latest_rclone; then
+    info "latest rclone installed into $DEST_APP_DIR"
+  else
+    warn "could not fetch latest rclone; falling back to repository rclone (if present)"
+    install_binary "$SRC_RCLONE" "$DEST_APP_DIR"
+  fi
+
+  # ensure ~/.local/bin exists and symlink the main binary there for convenience
+  if [ -f "$DEST_APP_DIR/$(basename "$SRC_BIN")" ]; then
+    ln -sf "$DEST_APP_DIR/$(basename "$SRC_BIN")" "$DEST_LOCAL_BIN/$(basename "$SRC_BIN")"
+    info "symlinked $DEST_LOCAL_BIN/$(basename "$SRC_BIN") -> $DEST_APP_DIR/$(basename "$SRC_BIN")"
+  fi
+
+  install_systemd_user_units
+  create_config_dir
+
+  post_install_notes
+  info "install complete"
+}
+
+main "$@"
