@@ -219,6 +219,18 @@ else
 	echo "ACCELA directory not found. Skipping..."
 fi
 
+ACCELA_DESKTOP="$HOME/.local/share/applications/ACCELA.desktop"
+if [ -f "$ACCELA_DESKTOP" ]; then
+	rm -f "$ACCELA_DESKTOP"
+	if [ ! -f "$ACCELA_DESKTOP" ]; then
+		echo "ACCELA desktop shortcut removed."
+	else
+		echo "Error: Failed to remove ACCELA desktop shortcut." >&2
+	fi
+else
+	echo "ACCELA desktop shortcut not found. Skipping..."
+fi
+
 # Remove SLSsteam (Share and Config)
 SLS_SHARE="$HOME/.local/share/SLSsteam"
 SLS_CONFIG="$HOME/.config/SLSsteam"
